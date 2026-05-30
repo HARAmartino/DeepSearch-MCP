@@ -1,0 +1,577 @@
+# Lessons Learned — DeepSearch-MCP
+
+**Dynamic knowledge base of bugs, surprises, and library quirks discovered during development.**
+
+This file is the long-term memory of the project. It is **not** loaded into the agent's
+context by default — read it only when:
+- A bug touches an area you don't recognize.
+- A test fails in a way that looks like a known library quirk.
+- You're about to bump a major dependency version.
+- You're doing the quarterly audit (see [METHODOLOGY.md](METHODOLOGY.md) §5).
+
+---
+
+## How to read this file
+
+Each entry carries one status tag:
+
+| Tag | Meaning |
+|-----|---------|
+| `[ACTIVE]` | Code still depends on this. Removing the lesson risks the bug returning. |
+| `[HISTORICAL]` | True at the time, but no longer load-bearing — kept as context. |
+| `[STALE]` | No longer true (library bumped, design changed). Slated for deletion at next audit. |
+
+**Maintenance rules:**
+- Append new findings as new dated entries; do not edit existing ones in place.
+- Tag every entry at write time. Re-tag during the quarterly audit.
+- Stale entries become noise the same way nav bars do — Prime Directive 1 applies
+  to documentation just as much as to extraction output.
+
+**Audit cadence:** quarterly, or whenever a dependency bumps a major version.
+**Last audit:** 2026-05-29 (post-Dogfooding cycle).
+
+---
+
+## Index
+
+| Date | Tag | Title |
+|------|-----|-------|
+| 2026-05-30 | [ACTIVE] | [The stack was UTF-8/English-centric — non-English usage broke 3 things](#2026-05-30-active-the-stack-was-utf-8english-centric--non-english-usage-broke-3-things) |
+| 2026-05-30 | [ACTIVE] | [Strip noise by position + marker, not by type — leading Wikipedia chrome](#2026-05-30-active-strip-noise-by-position--marker-not-by-type--leading-wikipedia-chrome) |
+| 2026-05-30 | [ACTIVE] | [Dedup by marking, not removing — duplicates are corroboration](#2026-05-30-active-dedup-by-marking-not-removing--duplicates-are-corroboration) |
+| 2026-05-30 | [ACTIVE] | [One TLS fingerprint is not enough — rotate on a block](#2026-05-30-active-one-tls-fingerprint-is-not-enough--rotate-on-a-block) |
+| 2026-05-30 | [ACTIVE] | [Real search returns what ranks, not what's authoritative](#2026-05-30-active-real-search-returns-what-ranks-not-whats-authoritative) |
+| 2026-05-30 | [ACTIVE] | [Search resilience — bypass the library when it has a single backend](#2026-05-30-active-search-resilience--bypass-the-library-when-it-has-a-single-backend) |
+| 2026-05-30 | [ACTIVE] | [Real research run (Sam Altman) — search is the loop's lifeline](#2026-05-30-active-real-research-run-sam-altman--search-is-the-loops-lifeline) |
+| 2026-05-30 | [ACTIVE] | [A mock of the unit-under-test hid a feature that never worked](#2026-05-30-active-a-mock-of-the-unit-under-test-hid-a-feature-that-never-worked) |
+| 2026-05-30 | [ACTIVE] | [Fixtures are not real usage — the Check was self-referential](#2026-05-30-active-fixtures-are-not-real-usage--the-check-was-self-referential) |
+| 2026-05-30 | [ACTIVE] | [Aggregate activation — "no data" is not "healthy"](#2026-05-30-active-aggregate-activation--no-data-is-not-healthy) |
+| 2026-05-29 | [ACTIVE] | [Automate what the agent is bad at, not what it's good at](#2026-05-29-active-automate-what-the-agent-is-bad-at-not-what-its-good-at) |
+| 2026-05-29 | [ACTIVE] | [Agent DX — ground truth is one command, not prose](#2026-05-29-active-agent-dx--ground-truth-is-one-command-not-prose) |
+| 2026-05-29 | [ACTIVE] | [Noise-Leak Auditor — systematizing the dogfooding CHECK step](#2026-05-29-active-noise-leak-auditor--systematizing-the-dogfooding-check-step) |
+| 2026-05-29 | [ACTIVE] | [Dogfooding Session — Real-World Cleaner Audit](#2026-05-29-active-dogfooding-session--real-world-cleaner-audit) |
+| 2026-05-28 | [ACTIVE] | [Phase 6 — Day 2 Operations (Self-Healing PDCA)](#2026-05-28-active-phase-6--day-2-operations-self-healing-pdca) |
+| 2026-05-28 | [ACTIVE] | [Phase 5 — Adversarial Dogfooding (4 Prime Lessons)](#2026-05-28-active-phase-5--adversarial-dogfooding-4-prime-lessons) |
+| 2026-05-28 | [ACTIVE] | [Phase 4 — 非HTML検出の設計判断](#2026-05-28-active-phase-4--非html検出の設計判断) |
+| 2026-05-28 | [ACTIVE] | [Phase 3 — suggest_queries の設計判断](#2026-05-28-active-phase-3--suggest_queries-の設計判断) |
+| 2026-05-28 | [ACTIVE] | [aiosqlite — 正しい使用パターン](#2026-05-28-active-aiosqlite--正しい使用パターン) |
+| 2026-05-28 | [ACTIVE] | [duckduckgo-search v8 — 追加の重要な制約 (Phase 2)](#2026-05-28-active-duckduckgo-search-v8--追加の重要な制約phase-2-判明) |
+| 2026-05-28 | [ACTIVE] | [eval_judge — スコアリング改善 (Phase 1)](#2026-05-28-active-eval_judge--スコアリング改善phase-1-で適用) |
+| 2026-05-28 | [HISTORICAL] | [curl_cffi v0.15 — 最新 impersonate ターゲット](#2026-05-28-historical-curl_cffi-v015--最新-impersonate-ターゲット) |
+| 2026-05-28 | [ACTIVE] | [trafilatura v2 — 3つの重要な制約](#2026-05-28-active-trafilatura-v2--3つの重要な制約) |
+| 2026-05-28 | [ACTIVE] | [eval_judge.py — ノイズ検出はライン密度に依存](#2026-05-28-active-eval_judgepy--ノイズ検出はライン密度に依存する) |
+| 2026-05-28 | [ACTIVE] | [duckduckgo-search v8 — DDGS is Synchronous](#2026-05-28-active-duckduckgo-search-v8--ddgs-is-synchronous) |
+| 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
+
+---
+
+### [2026-05-30] [ACTIVE] The stack was UTF-8/English-centric — non-English usage broke 3 things
+
+- **One Japanese research run ("片地/辺地共聴", government policy) exposed three
+  English/ASCII assumptions baked in across the stack:**
+  1. **Encoding (B20, fixed).** `read_article` returned **mojibake** for
+     `soumu.go.jp` (総務省) — a `Shift_JIS` page with no HTTP charset header.
+     curl_cffi defaulted to utf-8. Fix: `decode_html` detects charset from
+     bytes (header → `<meta>` → `charset_normalizer` → utf-8). The *primary*
+     authoritative source for the query had been unreadable garbage.
+  2. **Source tier (B21, fixed).** `.go.jp` / `.lg.jp` (Japanese government)
+     tagged `unknown` — the `_AUTH_TLDS` allowlist was `.gov`/`.gov.uk` only.
+     Extended to JP/FR/DE/EU/IN/KR/… gov + academic TLDs.
+  3. **Dedup (B22, open).** `_title_tokens` uses `[a-z0-9]+`, so Japanese
+     titles tokenize to ~nothing → `near_duplicate` silently no-ops on CJK.
+- **Rule.** **"Works" usually means "works in English/UTF-8".** Charset,
+  trusted-domain lists, and tokenizers all encode a default locale. Real
+  non-English usage is the only thing that surfaces these — and a *primary
+  authoritative source rendered as garbage* is a silent, severe failure
+  (no error code, just unusable text). Test with a non-Latin, non-UTF-8 target.
+- **Mechanism / tests:** `core/http.py::decode_html`,
+  `tests/test_http.py::TestDecodeHtml`. (B21/B22 recorded for follow-up.)
+
+### [2026-05-30] [ACTIVE] Strip noise by position + marker, not by type — leading Wikipedia chrome
+
+- **The risk (B9, deferred twice for it).** Wikipedia infoboxes / "Part of a
+  series on" nav templates leak as a messy *leading* markdown table. The naive
+  fix — "strip leading tables" or "strip tables with infobox-ish keys" — would
+  also eat **legitimate data tables** (comparison tables, stats, the asyncio
+  docs tables). Removing real content is worse than leaving noise.
+- **The safe discriminator: position AND marker, both required.** Strip a table
+  only if it is (a) in the **leading region** (before the first prose sentence,
+  modulo a leading H1) AND (b) carries a **high-precision infobox/nav marker**
+  ("part of a series on", "personal information", "date of birth", "notable
+  work", "senior career", …). Either signal alone is unsafe; together they are
+  high-precision. Mid-article tables (always after prose) and marker-less
+  leading tables are never touched.
+- **Verified on real articles** (Sam Altman / Mitoma / LLM all now open with
+  prose) and with explicit negative tests (prose-first body, leading data table
+  without a marker, mid-article table) + zero dogfood-baseline drift.
+- **Rule.** **When a noise pattern overlaps with legitimate content, gate on
+  *two independent signals*, not one.** A single heuristic strong enough to
+  catch the noise is usually strong enough to catch real content too;
+  intersecting two weak-alone signals gives precision without collateral.
+- **Follow-up (B18, same day).** The marker list was person/sports-centric, so
+  the next real research run (DuckDuckGo) immediately leaked a *company*
+  infobox. Like the `source_quality` allowlist, **a curated marker/keyword list
+  is inherently incomplete — expect real usage to extend it.** Added
+  company/website markers (still excluding generic words that double as
+  comparison-table columns). The "two-signal" rule held: even the new markers
+  are gated by leading-position, so the extension stayed safe.
+- **Mechanism / tests:** `utils/cleaner.py::strip_leading_wiki_chrome`,
+  `tests/test_extractor.py::TestLeadingWikiChrome`.
+
+### [2026-05-30] [ACTIVE] Dedup by marking, not removing — duplicates are corroboration
+
+- **The naive read of B16** was "collapse the 6 'Mitoma out of squad' results to
+  one — they're redundant." That would have been **wrong**: in the very report
+  that surfaced B16, the *fact that 6 independent sources said the same thing*
+  was the reliability signal I used to mark the claim 🟢 high-confidence.
+  **Removing duplicates destroys corroboration.**
+- **Fix.** `near_duplicate` is a *flag*, not a filter — results are never
+  removed. The agent skips *re-reading* a near-dup (saves a `read_article` call)
+  but still sees the count. Detection is conservative (Jaccard ≥ 0.6 on title
+  tokens): it catches the clear listicle rewrites but **deliberately keeps
+  same-story-different-angle** results (J ≈ 0.3), which carry distinct value.
+- **B15 synergy.** Within a duplicate cluster the *primary* (unflagged) prefers
+  an `authoritative` source — so a wire-service story outranks the SEO rewrites
+  of it. Two signals composing: trust + redundancy.
+- **Rule.** **When "deduplicating," ask what the duplicates *mean*.** For
+  research, repetition across independent sources is evidence, not noise —
+  surface it, don't suppress it. Mark > remove whenever the removed thing
+  carries information.
+- **Mechanism / tests:** `tools/search.py` (`_mark_near_duplicates`,
+  `_title_tokens`, `_jaccard`), `tests/test_search.py::TestMarkNearDuplicates`.
+
+### [2026-05-30] [ACTIVE] One TLS fingerprint is not enough — rotate on a block
+
+- **Context (B17).** B15's `source_tier` steered the agent to read Reuters first
+  — but `read_article` failed Reuters with a durable error. Diagnosis across
+  fingerprints: `jp.reuters.com` returns **401 to chrome131/124/120 and 200 to
+  safari17_0**. The single hardcoded `chrome131` fingerprint was the problem.
+- **Fix.** `core/http.py` now tries `_IMPERSONATE_TARGETS = (chrome131,
+  safari17_0)` and rotates to the next on a **401/403 block** (only — blocks
+  don't retry, so it's cheap; genuine network errors are not multiplied across
+  fingerprints). Reuters now reads.
+- **Two sharp sub-lessons:**
+  1. **Anti-bot is fingerprint-specific.** A site blocking "bots" may just be
+     blocking *Chrome's* TLS signature. Diversity (Safari) is a cheap escape
+     hatch — don't assume one impersonate target covers the web.
+  2. **A 401 from a website is usually anti-bot, not auth.** It was mis-mapped
+     to `CONN_ERROR` (implying a network fault); now `BLOCKED_403`. Map the
+     *meaning*, not the literal HTTP word.
+- **Throughline.** This bug only existed *because* B15 made the agent prefer
+  authoritative sources — fixing one gap exposed the next. Real-usage PDCA
+  compounds: each working feature reveals the next real friction.
+- **Mechanism / tests:** `core/http.py` (`_IMPERSONATE_TARGETS`,
+  `_fetch_with_target`), `tests/test_http.py`. Supersedes the load-bearing part
+  of the 2026-05-28 `[HISTORICAL] curl_cffi` entry.
+
+### [2026-05-30] [ACTIVE] Real search returns what *ranks*, not what's *authoritative*
+
+- **Meta-LLM research run.** With search finally working, a real query
+  ("Meta Llama LLM news 2026") returned **8/8 SEO/content-farm blogs** and zero
+  primary sources (Reuters / The Verge / ai.meta.com). The corroboration across
+  many independent low-authority blogs gives a *rough* consensus, but the tool
+  offers **no source-quality signal** — the agent can't tell a content farm
+  from Reuters. Recorded as B15 (source-quality hint) + B16 (near-duplicate
+  listicles waste reads).
+- **Reconfirmed:** B11 (autocomplete = shallow navigational variants:
+  "meta llama 4/3/ai/models", crowding out the `site:` primary-source
+  templates) and B14 (no freshness/date on results).
+- **Rule.** A web-search tool optimizes for *retrievability*, which SEO games.
+  For Deep Research, "found it" ≠ "trustworthy". The *agent* must weight sources
+  and corroborate across independent ones — and reports must label
+  secondary/unverified claims as such.
+- **Fix (B15, 2026-05-30).** `source_tier` on every result. Key design call:
+  tag `authoritative` with a **high-precision allowlist** but **never guess
+  `low_quality`** — a content farm and a legit small blog are byte-identical in
+  structure, so a confident "low quality" label would defame real sites.
+  Asymmetric confidence: name what you trust, default everything else to
+  `unknown` (≠ bad). **When you can identify the good with precision but not the
+  bad, label only the good — don't fabricate a negative verdict you can't
+  defend.** (`core/source_quality.py`.)
+
+### [2026-05-30] [ACTIVE] Search resilience — bypass the library when it has a single backend
+
+- **The fix for the SPOF (B12).** The Sam Altman run dead-ended because
+  `search_web` failed. Root cause: the installed `duckduckgo-search` proxies
+  *all* backends (`auto`/`html`/`lite`) through `https://www.bing.com/search`;
+  with bing DNS-blocked, the tool was 100% dead even though `duckduckgo.com`
+  was reachable. **A dependency's "options" can be an illusion — verify they're
+  actually independent.**
+- **The fix.** `_ddg_html_fallback` skips the library entirely and scrapes DDG's
+  own `html.duckduckgo.com/html/?q=` via our stealth `fetch`, parsing
+  `div.result` and decoding the `uddg=` redirect param. Triggered only when the
+  primary library raises, so normal environments are unaffected. Verified live:
+  search went from **100% dead → working**, and the originally-blocked research
+  task completed with real, source-cited results.
+- **Test-isolation bug it exposed [ACTIVE].** Running the live fallback cached
+  real results in the shared `./.cache/cache.db`; error-path unit tests (which
+  expect a cache miss) then read those cached lists and failed flakily. **Tests
+  must not share mutable state with real runs** — `conftest.py` now isolates
+  `DEEPSEARCH_CACHE_DIR` to a temp dir. (Also: mock the fallback to `[]` in
+  error-mapping tests so they don't make real network calls.)
+- **Mechanism / tests:** `tools/search.py::_ddg_html_fallback` / `_decode_ddg_href`,
+  `tests/test_search.py::{TestDdgHtmlFallback,TestSearchWebFallbackWiring,TestDecodeDdgHref}`,
+  `tests/conftest.py` (cache isolation).
+
+### [2026-05-30] [ACTIVE] Real research run (Sam Altman) — search is the loop's lifeline
+
+- **Task.** "Investigate Sam Altman's recent schedule." A genuine end-to-end
+  research use, run through the real tools.
+- **Outcome: blocked, honestly.** `search_web` failed (CONN_ERROR — bing
+  backend down here), so the loop dead-ended at step 1. `read_article` on
+  Wikipedia gave *background* (born 1985, Stanford dropout, OpenAI, spouse) but
+  not a *schedule*; "recent" requires live search. **I did not fabricate a
+  schedule from training memory** — and that refusal is the system working as
+  designed (fact-grounded > confident fabrication).
+- **Pain points recorded** (→ backlog B11–B14):
+  - **SPOF (B12):** search down ⇒ whole research loop dies; no fallback path.
+    `suggest_queries` yields queries (useless without search), `read_article`
+    needs URLs the agent can't get.
+  - **Misleading hint (B13):** "retry / broaden query" is wrong advice for a
+    durable backend outage; the agent loops on rewording.
+  - **Autocomplete is tabloid (B11, concrete):** real "Sam Altman" autocomplete
+    = "net worth / husband / sister / age" — popularity, not research vectors,
+    and it crowds out the lateral templates.
+  - **Infobox leak (B9, concrete):** the real Wikipedia article opened with the
+    infobox dumped as a broken markdown table ("Sam Altman | | |---|---| | Born
+    | …").
+  - **No freshness (B14):** `published_date` always null ⇒ can't filter for
+    recency on a time-sensitive query.
+- **Rule.** **In a tool-chain, the discovery step (search) is a single point of
+  failure for the entire workflow — harden it or give the agent a documented
+  fallback.** And: a research tool that *can't* fabricate is a feature, not a
+  bug — the empty-handed honest answer beats a confident hallucination.
+
+### [2026-05-30] [ACTIVE] A mock of the unit-under-test hid a feature that never worked
+
+- **Discovery.** Asked to run the real search tool: `search_web` is dead here
+  (the `duckduckgo-search` library routes *all* backends through `bing.com`,
+  which is DNS-blocked — a Prime Directive 3 library-drift note in itself). So
+  I ran the other search-family tool, `suggest_queries`, live — and its
+  autocomplete returned `[]`. Cause: `_fetch_autocomplete` called
+  `https://duckduckgo.com/ac/` **with no `?q=` parameter**. The topic was never
+  sent. Autocomplete had returned `[]` since Phase 3 — a **dead feature**.
+- **Why no test caught it.** The Stuck Agent tests `@patch`ed
+  `_fetch_autocomplete` *itself* to return canned phrases. They asserted the
+  merge logic around a function they had replaced — so they were green while
+  the real function never worked. **Mocking the unit under test validates your
+  mock, not your code.**
+- **Rule.** Mock at the **boundary** (the `fetch` call / network), never the
+  function whose behavior you are testing. At least one test must exercise the
+  real request-building path. (Added `TestAutocompleteRequest`: mocks `fetch`,
+  asserts the topic reaches the URL.)
+- **Corollary (the session's throughline).** Every real bug this session —
+  the auditor comma false-positive, citation/editorial leaks, and now a dead
+  autocomplete — was invisible to self-authored fixtures/mocks and obvious the
+  instant real tools hit the real web. **Periodic real-usage is not optional
+  QA polish; it is the only source of the bugs your test corpus is blind to.**
+- **Bonus library-drift note [ACTIVE].** `duckduckgo-search` (installed v8)
+  now proxies every backend (`auto`/`html`/`lite`) through `https://www.bing.com/search`.
+  "DuckDuckGo search" is bing-backed; a blocked bing host kills all of
+  `search_web` regardless of `backend=`. The `/ac/` autocomplete endpoint is
+  separate and hits `duckduckgo.com` directly.
+- **Mechanism / tests:** `tools/suggest.py::_autocomplete_url` / `_fetch_autocomplete`,
+  `tests/test_suggest.py::TestAutocompleteRequest`. Follow-up: B11 (live
+  autocomplete now crowds out primary-source templates).
+
+### [2026-05-30] [ACTIVE] Fixtures are not real usage — the Check was self-referential
+
+- **The challenge (from the project owner).** "Are we actually doing the PDCA
+  cycle based on *real* usage?" Honest answer: **no.** For many cycles the
+  Check (C) ran against **hand-written HTML fixtures** and `--demo` data. Those
+  fixtures only ever contained noise *I had already thought of*, so the Check
+  could confirm but never *surprise*. `search_web` had never worked here (bing
+  backend blocked), and real `read_article` output had never been read
+  critically. The loop was rigorous in machinery but self-referential in input.
+- **What real usage found in ONE pass** (pointing `read_article` at 4 live
+  pages — docs.python.org, PEP-8, Wikipedia, modelcontextprotocol.io):
+  1. **Auditor false positive.** The social-count regex `[\d.,]+` matched a
+     bare comma, so prose "…structured concurrency, like" flagged as
+     ENGAGEMENT_BAIT. Fixtures never had "comma + word", so it never showed.
+     Fix: require a leading digit (`\d[\d.,]*`).
+  2. **Citation leak.** Real Wikipedia prose carried inline `[1]`/`[12]`
+     citation superscripts — context pollution my fixtures never contained.
+     Fix: `strip_reference_markers` (fence-aware: prose stripped, code indices
+     `arr[1]` preserved).
+  3. **Editorial annotations + a content trap.** Pressure-testing whether to
+     bother snapshotting real pages (B10) instead surfaced a *better* find:
+     `[citation needed]`, `[update]`, `[note 1]`, `[dubious – discuss]` leak as
+     noise — BUT the same LLM/Transformer pages contain `[MASK]`, `[UNK]`,
+     `[CLS]`, which are **real NLP tokens**. A blanket `[word]` strip would
+     destroy content. Fix: an **allow-list** of editorial phrases (`_EDITORIAL_RE`)
+     — preserves anything not explicitly known-noise. *Declining B10 and
+     verifying why found more value than doing B10 would have.*
+- **Rule.** **A self-authored test corpus validates your assumptions, not
+  reality. Periodically run the real tools against the live web and *read the
+  output as a user*.** Fixtures lock in what you already know; live usage is
+  the only source of what you don't. Findings flow back as fixtures/patterns.
+- **Institutionalized.** `scripts/live_check.py` makes the real-web Check a
+  one-command habit (added to the monthly cadence). Backlog: capture
+  representative live pages as permanent fixtures (B10); strip "Part of a
+  series on" nav-template tables (B9, seen on Wikipedia).
+- **Mechanism / tests:** `scripts/live_check.py`,
+  `utils/cleaner.py::strip_reference_markers`,
+  `tests/test_extractor.py::TestCitationMarkers`,
+  `tests/test_dogfood_audit.py::TestMatchedSignal` (comma false-positive guard).
+
+### [2026-05-30] [ACTIVE] Aggregate activation — "no data" is not "healthy"
+
+- **Context.** The aggregate probe (`analyze_telemetry.py`) had been dormant —
+  dev mocks `fetch`, so `telemetry.db` only ever held synthetic rows.
+  `scripts/collect_telemetry.py` activates it by driving the *real* tools.
+- **Connectivity reality (operational note).** In this environment
+  `read_article` (curl_cffi) reaches live sites fine, but `search_web` fails:
+  DDGS routes to a **bing** backend whose host is DNS-blocked, so every search
+  is `CONN_ERROR`. Useful operational fingerprint: a wall of `search_web`
+  CONN_ERROR with healthy `read_article` = the DDGS backend is unreachable, not
+  the whole network. (A raw socket to duckduckgo.com:443 can succeed while the
+  library's bing backend still fails — don't infer "no network" from a search
+  failure alone.)
+- **The bug the real run exposed.** With only 9 rows, the analyzer confidently
+  printed "add a domain adapter for httpbin.org" off **3 samples**, and its
+  empty-state said "✅ healthy". Both over-claim: a 3-sample alert is a
+  coin-flip, and "no alerts on thin data" means "can't see one yet", not
+  "healthy".
+- **Fix (count).** `MIN_ROWS_FOR_CONFIDENCE` (50). Below it the report shows a
+  **LOW CONFIDENCE** banner, labels alerts **PROVISIONAL**, and refuses to call
+  thin data "healthy". **Rule: a metrics tool must distinguish "no signal" from
+  "not enough data to have a signal" — silence on thin data is not health.**
+- **Fix (representativeness).** Row *count* alone is not trust: 50 rows of a
+  contrived battery — or of a dead backend echoing one error — is still
+  unrepresentative. `tool_skew()` flags any tool that is ≥90% one non-success
+  status (`SKEW_DOMINANCE`, min `SKEW_MIN_CALLS`); skew keeps verdicts
+  PROVISIONAL **regardless of volume** ("more rows will NOT fix skew"). This
+  closes the trap I created with `collect_telemetry.py`: re-running the seeder
+  to cross the row floor can no longer manufacture false confidence.
+  **Rule: gate confidence on representativeness, not just sample size; a
+  metric you can satisfy by re-running a generator is gameable by design.**
+- **Mechanism / tests:** `evals/analyze_telemetry.py`
+  (`MIN_ROWS_FOR_CONFIDENCE`, `tool_skew`, `SKEW_DOMINANCE`),
+  `scripts/collect_telemetry.py`, `tests/test_analyze_telemetry.py` (14 tests).
+
+### [2026-05-29] [ACTIVE] Automate what the agent is bad at, not what it's good at
+
+- **The trap (B7 as written).** The backlog said "auto-propose a regex from an
+  auditor finding." Building that literally would have been near-worthless:
+  generating a regex string is a *core LLM strength* — not where an agent burns
+  effort or makes mistakes. Automating it adds surface area for ~zero gain
+  (violates the net-complexity rule).
+- **Where the agent actually fails.** This session, writing cleaner regexes by
+  hand, the real errors were: the trailing-`\b`-after-punctuation trap, and the
+  ever-present risk of an **over-broad** pattern that silently eats real prose
+  (the cleaner's worst failure mode). Verifying "what else does this pattern
+  match?" by hand means grepping every fixture and eyeballing — tedious and
+  error-prone. *That* is the automatable part.
+- **Reframe.** `scripts/propose_noise_regex.py` became a **safety preview**, not
+  an autocomplete: generalize a candidate (numbers → `\d+`, guarded boundaries),
+  confirm it matches the offending line, and compute its **blast radius** across
+  the live corpus — failing if it would remove any already-clean prose. Judgment
+  stays with the agent; verification toil moves to the tool.
+- **General rule.** When you set out to "automate an agent's task", first ask
+  *which half*. Automate the **mechanical-verification** half (where LLMs are
+  weak: exhaustive checking, blast radius, boundary traps). Leave the
+  **generative/judgment** half to the agent (where LLMs are strong). Automating
+  the strong half is motion without progress.
+- **Mechanism / tests:** `scripts/propose_noise_regex.py`,
+  `evals/dogfood_audit.py::matched_signal`, tests in `tests/test_scripts.py`
+  (`TestCandidateRegex`, `TestBlastRadius`, `TestProposeForLine`).
+
+### [2026-05-29] [ACTIVE] Agent DX — ground truth is one command, not prose
+
+- **Principle clarified by the maintainer.** DeepSearch-MCP is a tool *for*
+  LLMs, maintained *by* LLMs. The sole usability metric is the agent's, not a
+  human's. So agent-experience friction is a first-class bug, not polish.
+- **The friction (self-identified while dogfooding).** An agent's largest
+  recurring tax is **re-orientation after context compaction**: "how many
+  tests now? are gates green? what's next?" That cost ~5 tool calls across 3
+  files. And running the 3 merge gates as separate commands let an agent nearly
+  report "green" with one gate unrun.
+- **Fix.** `scripts/status.py` (one-call live orientation) and
+  `scripts/verify.py` (single-exit-code merge gate). A top-of-file
+  **Orientation** block in `CLAUDE.md` (the only always-loaded doc) points the
+  next agent at them before it trusts a stale model.
+- **Anti-pattern explicitly rejected.** A committed `STATUS.md` was the obvious
+  idea — and wrong. A stored status file drifts and becomes the very stale
+  artifact it was meant to fix. **Rule: for agent orientation, *compute* ground
+  truth on demand; never persist it.** (Same instinct as Prime Directive 1:
+  stale context is noise.)
+- **Net-complexity rule.** A DX fix must not *grow* the surface area it
+  complains about. `verify.py` *replaced* three hand-typed commands in
+  `MAINTENANCE.md` (fewer, not more); `status.py` reads existing files rather
+  than adding a new one to sync.
+- **Docs map > docs consolidation.** With 11 docs, the friction is *routing*
+  ("which doc for X?") and *sync-risk* (touch one, dangle a reference).
+  Consolidation is high-risk and lossy; a committed map drifts. The fix is a
+  *generated* map + integrity checker (`scripts/docs_map.py`): it prints each
+  doc's role/purpose and **mechanically** fails on dead relative links (now a
+  `verify.py` gate), converting "remember to keep docs in sync" from discipline
+  into an enforced check. It earned its keep on run 1 — caught 2 orphaned docs
+  and a stale `ROADMAP` header. **Rule: enforce doc integrity mechanically;
+  don't rely on the agent remembering to cross-check N files.**
+- **Orphan allow-list = signal hygiene, not metric-gaming.** A genuinely
+  standalone doc (one-time snapshot like `BASELINE.md`) is allow-listed so the
+  orphan warning only fires on *accidental* undiscoverability. A check that
+  always warns trains the agent to ignore it (the same alert-fatigue trap as
+  benign test warnings).
+- **Environment note.** The agent tool-shell often lacks `uv` / `~/.local/bin`
+  on PATH even when the login shell has them. Scripts must auto-detect
+  `.venv/bin/` (see `_venv_bin`), and docs should not assume `uv run` works.
+- **Mechanism / tests:** `scripts/status.py`, `scripts/verify.py`,
+  `tests/test_scripts.py` (14 tests).
+
+### [2026-05-29] [ACTIVE] Noise-Leak Auditor — systematizing the dogfooding CHECK step
+
+- **Problem (a methodology gap).** The dogfooding loop's CHECK step was "a human
+  reads the whole extraction body and *hopes* to notice leftover noise." Two
+  failures: (a) unreproducible — different reviewers catch different things;
+  (b) static fixtures = one-shot — once their noise is patched, re-running the
+  harness surfaces nothing, so the semantic loop runs dry and *feels* done.
+- **Root-cause of the backlog mis-fire (B5).** Backlog item B5 proposed putting
+  a "noise leak hint" inside `analyze_telemetry.py`. That is impossible:
+  `telemetry.db` stores **no response bodies** — only `(timestamp, tool_name,
+  input_summary, status, tokens_approx, latency_ms, domain)`. The analyzer has
+  nothing to scan. **Rule:** validate a backlog item against the data model
+  *before* estimating it; an aggregate store can never answer a per-line
+  semantic question.
+- **Solution.** `evals/dogfood_audit.py` (`audit_markdown()`), wired into
+  `dogfood_research.py` as STEP 4, lives where bodies exist (the dogfooding
+  path). It runs on **post-cleaner** output, so anything it flags is by
+  definition a leak the cleaner missed — a candidate for a new
+  `_NOISE_LINE_RE` pattern or a domain adapter.
+- **Two-tier design (the bug that taught it).** A single-tier, length-gated
+  heuristic silently skipped a 16-word affiliate-disclosure sentence because
+  "long line = prose." Fixed by splitting into **STRONG** signals
+  (affiliate/sponsor/legal — fire at any length, never legitimate prose) and
+  **SOFT** signals (promo CTA / metadata stub / engagement counts — fire only
+  on short lines, so "we share a common goal…" is spared). **Rule:** a
+  noise detector needs *two* sensitivities — some noise is unambiguous at any
+  length, some is only noise when it's a short label.
+- **Trailing-`\b` regex trap.** The METADATA_STUB alternation ended in `\b`,
+  which failed on alternatives ending in punctuation (`Tags:`, `By J`) because
+  there is no word boundary between `:`/letter and the following space. The
+  `^\s*` anchor already scopes line-starts; drop the trailing `\b`.
+- **Validation (Measurable).** New `zdnet` fixture → auditor reported 1
+  suspected line (affiliate disclosure) before the cleaner patch, 0 after.
+  Other 3 fixtures stayed at 0 (no false positives on real prose).
+- **Mechanism / tests:** `evals/dogfood_audit.py` + `tests/test_dogfood_audit.py`
+  (24 tests). The auditor *proposes*; the human *disposes* — findings are
+  advisory, never auto-applied to the cleaner.
+
+### [2026-05-29] [ACTIVE] Dogfooding Session — Real-World Cleaner Audit
+- **Workflow:** `evals/dogfood_research.py` を実 `@track` 経由で実行し、AIエージェントフレームワーク（LangGraph / CrewAI / AutoGen）の調査タスクを実演。実環境を模した HTML フィクスチャ（TechCrunch / LangChain blog 風）+ patched fetch で抽出パスを end-to-end でテスト。
+- **発見された4つの未捕捉ノイズ（v1 cleaner では除去できなかった）:**
+  1. `Estimated reading time: 8 minutes` — 2026年スタイルの記事メタデータ。
+  2. `Listen to this article on the X Podcast` — 音声 CTA（podcast 連携で増加）。
+  3. `Written by Maria Santos — Senior AI Correspondent` — frontmatter author と重複するレポーターカード。
+  4. `Continue reading to see the production deployment checklist` — lazy-load / paywall ゲート。
+- **追加で発見された関連パターン:**
+  5. `By signing up, you agree to our Terms` — newsletter 同意ゲート。
+  6. `Get the latest in AI delivered to your inbox` — 受信箱訴求 CTA。
+  7. `Tags: A, B, C` / `Posted in: X` — 末尾メタフッター。
+  8. `Originally published in TechCrunch` — クロスポスト出典表記。
+- **Rule (Cleaner v2 patterns):** 上記8パターンを `utils/cleaner.py` の `_NOISE_LINE_RE` に追加。テストは `tests/test_extractor.py::TestDogfoodingNoisePatterns` に格納。Gauntlet 平均は ≥ 8.5/10 を維持。
+- **メタ教訓:** `analyze_telemetry.py` は**集計レベル**の問題（失敗率、トークン平均）は捕捉できるが、**個別の意味的ノイズ**（特定の宣伝文句）は捕捉できない。Telemetry 単独では不十分で、**人間（あるいは LLM）による出力の目視検査**が定期的に必要。Day 2 運用には Dogfooding を月次サイクルで組み込むこと。
+- **Dogfooding スクリプトの再利用パターン:**
+  1. `os.environ["DEEPSEARCH_TELEMETRY"] = "1"` を import 前に設定。
+  2. `await telemetry.reset_for_tests()` でセッション開始時に clean DB。
+  3. ネットワーク失敗 (`CONN_ERROR`) もそれ自体価値あるテレメトリ — sandbox でも有効。
+  4. `patch("...fetch", AsyncMock)` で HTML フィクスチャを差し込み、real extraction pipeline を走らせる。
+  5. 終了時に `await telemetry.drain()` で fire-and-forget をフラッシュ。
+- **Follow-up automation:** この session で発見した4つのノイズが将来再導入されないよう、`evals/dogfood_regression.py` + `tests/test_dogfood_regression.py` + `evals/dogfood_baseline/` を構築。golden file 方式で extraction 出力を回帰検証する。
+
+### [2026-05-28] [ACTIVE] Phase 6 — Day 2 Operations (Self-Healing PDCA)
+
+これらは Telemetry (`telemetry.db`) で観測された運用パターンから導出された、**自動パッチ適用ルール**。エージェントとしてリリース後の保守を担当する場合、まず `evals/analyze_telemetry.py` を実行し、そのレポート結果に従って [METHODOLOGY.md](METHODOLOGY.md) の Operations Rules でアクションを起こすこと。
+
+**Telemetry スキーマ:** `(timestamp, tool_name, input_summary, status, tokens_approx, latency_ms, domain)` — `core/telemetry.py` の `@track(tool_name, primary_input)` デコレータで自動記録。テスト時は `DEEPSEARCH_TELEMETRY=0` で無効化。
+
+(Operations Rules 1–5 の詳細は [METHODOLOGY.md](METHODOLOGY.md) §3 を参照)
+
+### [2026-05-28] [ACTIVE] Phase 5 — Adversarial Dogfooding (4 Prime Lessons)
+
+これらは Persona A (Critic) のリサーチタスク実行ログから得られた、**エージェント視点での使いにくさ**に関する不変ルール。テストが通っても、これらに違反するコードはエージェントを殺す。
+
+**Lesson 1: Tools must compose. Output of one tool MUST be valid input to the next.**
+- **Anti-pattern observed:** `suggest_queries("AI agent memory management RAG")` returns `'"AI agent memory management RAG" criticism'`. Passed to `search_web` → 0 hits (exact-phrase match impossible).
+- **Rule:** If a tool builds queries/URLs/identifiers for downstream tools, the output must be **immediately usable** without post-processing by the agent.
+- **Mechanism (suggest.py):** `_render_topic()` quote-wraps only topics with ≤2 words; longer topics pass through as bare keywords.
+- **Verification:** `tests/test_suggest.py::TestSmartQuoting` (7 regression tests).
+
+**Lesson 2: Error hints must match the input type the tool received.**
+- **Anti-pattern observed:** `search_web(query="...")` failure returned `hint: "Check URL validity"`. Agent never passed a URL → confusion → deadlock.
+- **Rule:** A tool's error hint is a function of (error_code, **call_context**). The same `CONN_ERROR` from `search_web` and `read_article` must produce **different** hints.
+- **Mechanism (errors.py):** `structured_error()` accepts `hint_override` and `retryable_override`. Each tool injects its own context-specific hint at the call site.
+- **Verification:** `tests/test_search.py::TestSearchWebContextAwareHints` (5 regression tests).
+
+**Lesson 3: Error messages must be sanitized before they reach the LLM.**
+- **Anti-pattern observed:** DDGS raises with a 350-char message containing the raw Bing URL with query params and filters (`https://www.bing.com/search?q=...&filters=ex1%3A%22ez5_20236_20601%22`). Useless tokens.
+- **Rule:** Strip all `https?://\S+` from outgoing error messages; replace with `[REDACTED_URL]`. Truncate at 200 chars.
+- **Mechanism (errors.py):** `sanitize_error_text()` is invoked automatically inside `structured_error()`.
+- **Why this matters:** A Deep Research loop with 50 tool calls and 10% error rate burns 5 × 85 ≈ 425 tokens on raw backend URLs without sanitization. Multiply by a $0.05/1k token rate and the cost is non-trivial across sessions.
+
+**Lesson 4: Transient failures (DNS/timeout/reset) must signal `retryable=True`.**
+- **Anti-pattern observed:** Generic `CONN_ERROR` returned `retryable: false` even for transient DNS failures. Agents see this and **permanently abandon** the search task — they don't even try once more.
+- **Rule:** Detect transient-error patterns (`dns`, `timeout`, `reset`, `refused`, `unreachable`) in the raw exception message and flip `retryable` to `True`. Non-transient backend errors (invalid query, malformed input) stay `retryable=False`.
+- **Mechanism (errors.py):** `is_transient_conn_error(message)` keyword detector. Used by `search_web._map_ddgs_exception` and `read_article`'s FetchError handler.
+- **Verification:** `tests/test_search.py::TestTransientErrorDetection` (5 tests).
+
+**Secondary Lessons:**
+- **H1 vs frontmatter title dedup (FRICTION-D1):** Trafilatura emits `# Title` as the first H1; we already serialize the same string into frontmatter `title:`. `_strip_redundant_h1()` removes the duplicate (~5-10% token savings per article). `eval_judge.py` was updated to count frontmatter `title:` as an implicit H1 for the heading-levels structure bonus — so dedup doesn't fight the quality scorer.
+- **Temporal-freshness queries belong in the top-3 (FRICTION-C3):** Most research tasks are time-bounded ("2025 trends"). `_VIEWPOINT_TEMPLATES` was reordered: `"{topic} 2025 OR 2026"` is now position 0.
+- **Docstring USE WHEN / DO NOT USE WHEN must be mutually exclusive AND actionable:** Each `DO NOT USE WHEN` should name the alternative tool ("→ call X directly"). Each `USE WHEN` should include a quantifiable trigger ("last 2+ search rounds returned same sources").
+
+### [2026-05-28] [ACTIVE] Phase 4 — 非HTML検出の設計判断
+- **URL 拡張子ガード（ネットワーク呼び出し前）:** `.pdf`, `.zip`, `.jpg` 等の拡張子を `PurePosixPath(urlparse(url).path).suffix` で検出し、`fetch()` 呼び出し前にショートサーキットする。エージェントが PDF URL を渡すケースは頻発するため、ネットワーク往復を完全に省略できる。
+- **Content-Type ガード（ネットワーク呼び出し後）:** サーバーが `.html` を持つ URL から `application/pdf` を返すケースに対応。`response.headers.get("content-type", "")` をチェックし、`application/pdf`, `image/*`, `video/*`, `audio/*`, `application/vnd.*` を除外する。
+- **エラーコード `UNSUPPORTED_FORMAT`:** `retryable: false` / hint: "Skip this URL and search for an HTML alternative." — エージェントに「別のURLを探せ」と明示的に指示する。
+- **E2E シミュレーション設計:** ネットワーク制限がある環境（CI等）のため `--demo` モードを実装。現実的な事前設定データでフルフローを検証できる。Live モードはそのまま実ネットワーク呼び出しを行う。
+- **MCP クライアント設定 (2026年確認):** `claude_desktop_config.json` は `{"mcpServers": {"name": {"command": "uv", "args": ["--directory", "/path", "run", "python", "-m", "module"]}}}` 形式。`type: "stdio"` は省略可能（デフォルト）。macOS パス: `~/Library/Application Support/Claude/claude_desktop_config.json`。
+
+### [2026-05-28] [ACTIVE] Phase 3 — suggest_queries の設計判断
+- **DDG Autocomplete エンドポイント:** `https://duckduckgo.com/ac/?q=<topic>` は `[{"phrase":"..."}]` を返す公開 API。DDGS v8 には built-in suggest メソッドはない。`curl_cffi` の `fetch()` で直接叩く（timeout=5s で素早くフォールバック）。
+- **エコーチェンバー破壊のテンプレート戦略:** AC サジェストは「人気ある検索パターン」を返すが、エージェントがすでに見ているパターンと同じことが多い。`_VIEWPOINT_TEMPLATES`（criticism / alternatives / site:arxiv / 2025 OR 2026）を**常に**付加することで AC が使えない場合でも多様性を保証する。
+- **AC の最初の結果はスキップ:** `phrases[0].lower() == topic.lower()` の場合（完全一致）はスキップ。DDG は常に入力語そのものを先頭に返す習性があり、これはノイズになる。
+- **`Optional[str]` → `str | None`:** ruff UP045 で自動修正。Python 3.11+ プロジェクトでは `from __future__ import annotations` + `X | None` を使用すること。
+- **Stuck Agent テストの設計:** `_fetch_autocomplete` を `AsyncMock` でパッチして AC 結果を制御し、テンプレートクエリの内容を検証する。実際のネットワークコールは不要。エコーチェンバー文脈は diet blog / tech blog の2種を用意してカバレッジを確保。
+
+### [2026-05-28] [ACTIVE] aiosqlite — 正しい使用パターン
+- **NG:** `db = await aiosqlite.connect(path)` の後で `async with db:` → スレッドが二重起動されて RuntimeError
+- **OK:** `async with aiosqlite.connect(path) as db:` を使う、または `db = await aiosqlite.connect(path)` を取得後は `try/finally: await db.close()` で管理する
+- **理由:** `aiosqlite.connect()` は接続を待機するコルーチンを返すが、返却されたオブジェクト自体も async context manager。`await` 済みオブジェクトに再度 `async with` すると内部スレッドが再起動しようとしてエラーになる。
+
+### [2026-05-28] [ACTIVE] duckduckgo-search v8 — 追加の重要な制約（Phase 2 判明）
+- **結果dictキーは `href`（`url` ではない）:** `DDGS.text()` の結果は `title`, `href`, `body` キーを持つ。SPEC.md の `SearchResult.url` にマッピングする際は `r.get("href", "")` を使うこと。
+- **`published_date` は常に None:** html/lite/bing いずれのバックエンドも日付を返さない。`SearchResult.published_date` は `None` を期待することをエージェントのプロンプトで明示すること。
+- **内部 HTTP クライアントは `primp` (Rust):** `curl_cffi` ではなく `primp` が使われており `impersonate="random"` がデフォルト。DDGS 自体がステルス対応済み。追加の curl_cffi ヘッダーは不要だが、`DDGS(headers={...})` で Accept-Language 等を上書きできる。
+- **パッケージ名変更警告:** `duckduckgo_search` → `ddgs` に改名中。`RuntimeWarning` を `warnings.filterwarnings("ignore", category=RuntimeWarning)` で抑制すること。
+- **Thread Safety:** `DDGS` インスタンスを共有してはならない。必ず呼び出しごとに新インスタンスを生成し、`asyncio.to_thread()` でスレッドに委譲すること。
+
+### [2026-05-28] [ACTIVE] eval_judge — スコアリング改善（Phase 1 で適用）
+- **コードブロック密度補正:** コードブロックは1行あたり文字数が短く density が不当に低くなる。`body_no_code`（コードブロック除去後）で prose 行長を計算し、コードブロックがある場合は density の下限を 2.0 に設定。
+- **複数見出しレベル構造ボーナス:** heading_levels ≥ 2 なら +0.5 の structure ボーナスを付与。News/Wiki/TechDocs 等の多セクション文書を正しく評価できる。
+
+### [2026-05-28] [HISTORICAL] curl_cffi v0.15 — 最新 impersonate ターゲット
+- **Available:** `chrome146` が最新。`chrome131` も引き続き利用可能（CLAUDE.md 指定値）。
+- **Rule:** `chrome131` はほぼ全サイトで動作実績があり安定している。新しいターゲットに変更する前に必ず動作確認すること。
+- **Status note:** historical because code defaults are stable; revisit if Operations Rule 4 fires.
+
+### [2026-05-28] [ACTIVE] trafilatura v2 — 3つの重要な制約
+- **コード言語アノテーション消失:** `<code class="language-python">` の言語情報が常に削除される。**対処:** BeautifulSoup で抽出前に DOM 順で言語リストを収集し、抽出後の ` ``` ` フェンスに順番に注入する（`core/extractor.py` の `_extract_code_languages` / `_restore_code_languages`）。
+- **コンテンツ重複（`<article>`/`<main>` タグバグ）:** `<article>` または `<main>` タグで包まれたコンテンツが2回出力される。**対処:** `utils/cleaner.py` の `deduplicate_blocks()` が段落ブロック単位で重複を除去する。
+- **`with_metadata=True` が Markdown を破壊:** このフラグを使うとコードブロックがプレーンテキスト化される。**必須:** メタデータは `trafilatura.extract_metadata(html)` で別途取得し、フロントマターを手動組み立てすること。
+
+### [2026-05-28] [ACTIVE] eval_judge.py — ノイズ検出はライン密度に依存する
+- **Rule:** ノイズスコアはノイズ行数÷総行数の比率で計算する。短い記事（< 15行）でフッターが数行あるだけで比率が急上昇しスコアが過度に低くなる。
+- **Solution:** eval_judge のテストフィクスチャは**最低30行以上**の現実的な長さを使うこと。短すぎるサンプルはスコアが不安定になる。
+
+### [2026-05-28] [ACTIVE] duckduckgo-search v8 — DDGS is Synchronous
+- **Rule:** `duckduckgo-search` v8.x の `DDGS.text()` は**同期メソッド**（asyncでない）。
+- **Impact:** SPEC.md の「全I/OはAsync」要件と衝突する。
+- **Solution:** `await asyncio.get_event_loop().run_in_executor(None, ddgs.text, ...)` でスレッドプールに委譲すること。`async def` 内で直接 `DDGS().text()` を呼ばないこと。
+- **API Signature (v8.1.1):** `DDGS.text(keywords, region=None, safesearch='moderate', timelimit=None, backend='auto', max_results=None) -> list[dict[str, str]]`
+- **Constructor:** `DDGS(headers=None, proxy=None, timeout=10, verify=True)` — カスタムヘッダーはここで渡す。
+
+### [2026-05-28] [HISTORICAL] Project Initialization
+- **Rule:** `duckduckgo-search` version 7.x changed `DDGS` import path. Always verify via `pip show`.
+- **Pattern:** Tech blogs often have "Related Posts" sections that look like main content. `trafilatura` config `favor_precision=True` helps but requires manual DOM inspection for specific domains like Medium.
+- **Status note:** v7 path lesson is superseded by v8 lessons above; kept for historical context only.

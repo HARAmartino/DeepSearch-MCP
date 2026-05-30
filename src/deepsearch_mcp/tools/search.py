@@ -1,0 +1,404 @@
+"""MCP Tool: search_web — DuckDuckGo search with caching and structured error handling.
+
+Implementation notes:
+- DDGS v8 is a SYNCHRONOUS library (uses primp Rust client internally).
+  All calls are wrapped in asyncio.to_thread() to avoid blocking the event loop.
+- DDGS v8 result dicts use key 'href' (not 'url') for the page URL.
+- DDGS v8 does not return publication dates in any backend (html/lite/bing).
+  The published_date field will be None for all results.
+- DDGS already applies TLS fingerprinting via primp (impersonate='random').
+  Additional stealth headers are passed via DDGS(headers={...}) constructor.
+- A fresh DDGS instance is created per request (thread-safe, no shared state).
+- RuntimeWarning about package rename (duckduckgo_search → ddgs) is suppressed.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import random
+import re
+import warnings
+from typing import Literal
+from urllib.parse import parse_qs, quote_plus, urlparse
+
+from mcp.server.fastmcp import FastMCP
+
+from ..core import errors as err
+from ..core.cache import TTL_SEARCH, cache_get, cache_set, make_search_key
+from ..core.http import fetch
+from ..core.models import SearchResult
+from ..core.source_quality import classify_source
+from ..core.telemetry import track
+from ..utils.date_parser import to_iso8601
+
+mcp = FastMCP("deepsearch-search-web")
+
+_JITTER_MIN = 0.5
+_JITTER_MAX = 1.5
+
+# Extra headers layered on top of primp's built-in browser fingerprint
+_DDGS_HEADERS = {
+    "Accept-Language": "en-US,en;q=0.9,ja;q=0.8",
+}
+
+# Direct-DuckDuckGo HTML endpoint — the fallback when the `duckduckgo-search`
+# library fails. The library proxies all backends through bing.com; if bing is
+# unreachable (regional block, outage) the whole tool dies even though DDG's
+# own endpoint is fine. This scrapes DDG directly via our stealth fetch.
+# (Discovered 2026-05-30: a real research run dead-ended because bing was
+# DNS-blocked while html.duckduckgo.com was perfectly reachable.)
+_DDG_HTML_URL = "https://html.duckduckgo.com/html/"
+
+
+@mcp.tool()
+@track(tool_name="search_web", primary_input="query")
+async def search_web(
+    query: str,
+    region: str = "wt-wt",
+    safesearch: Literal["on", "moderate", "off"] = "moderate",
+    timelimit: Literal["d", "w", "m", "y"] | None = None,
+    max_results: int = 10,
+) -> str:
+    """
+    Performs a web search using DuckDuckGo and returns structured results.
+
+    ## USE WHEN
+    - **First step** of any research task — get a wide net of URLs and snippets.
+    - Looking up a specific factual answer ("when was X released?").
+    - Discovering URLs to hand off to `read_article` for full content.
+
+    ## DO NOT USE WHEN
+    - You already have a URL → call `read_article` directly.
+    - Your last 2+ search rounds returned the same sources/angle →
+      call `suggest_queries` first, then pick a lateral query.
+    - Query is empty or only whitespace — returns EMPTY_CONTENT error.
+
+    ## PARAMETERS
+    - `query`: Keywords only (not full sentences). Max 500 chars.
+    - `region`: Country code like 'us-en', 'jp-jp', 'wt-wt' (global default).
+    - `timelimit`: 'd'=last day, 'w'=week, 'm'=month, 'y'=year. None=all time.
+    - `max_results`: 1–50. Default 10. Use lower values for targeted queries.
+
+    ## RETURNS
+    JSON array of result objects, each with:
+    - `title`: Page title
+    - `url`: Full URL of the result
+    - `body`: Search snippet/summary (150–300 chars)
+    - `published_date`: ISO 8601 date if available, otherwise null
+    - `source_tier`: 'authoritative' (curated trusted domain, .gov, .edu) or
+      'unknown'. **Read 'authoritative' results first.** If a result set is all
+      'unknown' (common for SEO-heavy topics), corroborate facts across several
+      independent results before trusting them. 'unknown' ≠ low quality — it
+      just means the domain isn't on the trust list.
+    - `near_duplicate`: true if the title closely matches an earlier result
+      (same story). **Don't re-read near-duplicates** — but their count is
+      useful corroboration. The primary copy (false) prefers an authoritative
+      source. Results are never removed, only flagged.
+
+    ## CONSTRAINTS
+    - Results are cached for 24 hours. Repeated identical queries are free.
+    - A random delay (0.5–1.5s) is inserted before each live request.
+    - Returns a structured JSON error if rate-limited or network fails.
+
+    ## EXAMPLES (Few-Shot)
+
+    Good:
+      query="Python asyncio tutorial 2026", timelimit="y"
+      → [{"title":"...","url":"https://...","body":"...","published_date":null}]
+
+    Good (targeted, low token cost):
+      query="site:github.com trafilatura", max_results=5
+      → 5 GitHub results for trafilatura
+
+    Bad (too broad — use suggest_queries first to refine):
+      query="machine learning"
+
+    Bad (has a URL already — use read_article directly):
+      query="https://docs.python.org/3/library/asyncio.html"
+    """
+    if not query or not query.strip():
+        return err.structured_error(
+            err.EMPTY_CONTENT,
+            "query must be a non-empty string",
+            hint_override="Provide search keywords (e.g. 'python asyncio tutorial').",
+        )
+
+    max_results = max(1, min(50, max_results))
+    region_param = None if region == "wt-wt" else region
+
+    # --- Cache check ---
+    cache_key = make_search_key(query, region_param, safesearch, timelimit)
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
+
+    # --- Jitter delay (CLAUDE.md: 0.5–1.5s before live request) ---
+    await asyncio.sleep(random.uniform(_JITTER_MIN, _JITTER_MAX))
+
+    # --- DDG search (sync → thread) ---
+    try:
+        raw_results = await asyncio.to_thread(
+            _ddgs_search_sync,
+            query,
+            region_param,
+            safesearch,
+            timelimit,
+            max_results,
+        )
+        results = [
+            SearchResult(
+                title=r.get("title", ""),
+                url=r.get("href", ""),
+                body=r.get("body", ""),
+                published_date=to_iso8601(r.get("published")),
+                source_tier=classify_source(r.get("href", "")),
+            ).model_dump()
+            for r in (raw_results or [])
+        ]
+    except Exception as exc:
+        # Primary library failed (e.g. bing backend unreachable). Try the
+        # direct-DDG HTML fallback before giving up — it bypasses bing.
+        results = await _ddg_html_fallback(
+            query, region_param, safesearch, timelimit, max_results
+        )
+        if not results:
+            return _map_ddgs_exception(exc)
+
+    # Flag near-duplicate titles (B16) — applies to both DDGS and fallback paths.
+    results = _mark_near_duplicates(results)
+
+    output = json.dumps(results, ensure_ascii=False, indent=None)
+
+    # --- Cache store (24h TTL) ---
+    await cache_set(cache_key, output, TTL_SEARCH)
+
+    return output
+
+
+async def _ddg_html_fallback(
+    query: str,
+    region: str | None,
+    safesearch: str,
+    timelimit: str | None,
+    max_results: int,
+) -> list[dict]:
+    """Scrape DuckDuckGo's own HTML endpoint directly (no bing). Best-effort.
+
+    Returns SearchResult dicts, or [] on any failure (so the caller can fall
+    through to the original structured error).
+    """
+    try:
+        from bs4 import BeautifulSoup
+
+        params = [f"q={quote_plus(query)}"]
+        if timelimit:
+            params.append(f"df={timelimit}")          # d/w/m/y
+        if region:
+            params.append(f"kl={region}")             # e.g. us-en
+        if safesearch == "off":
+            params.append("kp=-2")
+        elif safesearch == "on":
+            params.append("kp=1")
+        url = f"{_DDG_HTML_URL}?{'&'.join(params)}"
+
+        resp = await fetch(url, timeout=8)
+        if resp.status_code != 200:
+            return []
+
+        soup = BeautifulSoup(resp.text, "lxml")
+        out: list[dict] = []
+        for res in soup.select("div.result"):
+            if "result--ad" in (res.get("class") or []):
+                continue
+            a = res.select_one("a.result__a")
+            if not a:
+                continue
+            real_url = _decode_ddg_href(a.get("href", ""))
+            if not real_url:
+                continue
+            snippet_el = res.select_one(".result__snippet")
+            out.append(
+                SearchResult(
+                    title=a.get_text(strip=True),
+                    url=real_url,
+                    body=snippet_el.get_text(strip=True) if snippet_el else "",
+                    published_date=None,
+                    source_tier=classify_source(real_url),
+                ).model_dump()
+            )
+            if len(out) >= max_results:
+                break
+        return out
+    except Exception:
+        return []
+
+
+def _decode_ddg_href(href: str) -> str:
+    """Resolve a DDG result href to the real target URL.
+
+    DDG wraps results as `//duckduckgo.com/l/?uddg=<encoded url>&rut=...`.
+    Returns the decoded target, or the href itself if already direct, or "".
+    """
+    if not href:
+        return ""
+    if href.startswith("//"):
+        href = "https:" + href
+    try:
+        q = parse_qs(urlparse(href).query)
+        if "uddg" in q and q["uddg"]:
+            return q["uddg"][0]
+    except Exception:
+        pass
+    return href if href.startswith("http") else ""
+
+
+# Near-duplicate detection (B16). Conservative: only flags HIGH-confidence
+# title matches so it never collapses same-story-different-angle results
+# (those carry corroboration value — see the Mitoma research run).
+_DEDUP_THRESHOLD = 0.6  # Jaccard on significant title tokens
+_STOPWORDS = frozenset(
+    "the a an of for in on to and or vs is was are be by with from at as how "
+    "why what when who new latest best top full list guide your you".split()
+)
+
+
+def _title_tokens(title: str) -> frozenset[str]:
+    """Significant lowercase tokens of a title (≥3 chars, no stopwords)."""
+    words = re.findall(r"[a-z0-9]+", (title or "").lower())
+    return frozenset(w for w in words if len(w) >= 3 and w not in _STOPWORDS)
+
+
+def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _mark_near_duplicates(results: list[dict]) -> list[dict]:
+    """Tag results whose title near-matches an earlier cluster's primary.
+
+    Keeps everything (corroboration matters); only sets `near_duplicate`. The
+    cluster primary (near_duplicate=False) prefers an `authoritative` source.
+    """
+    clusters: list[dict] = []  # each: {"tokens", "primary_idx"}
+    for i, r in enumerate(results):
+        toks = _title_tokens(r.get("title", ""))
+        r["near_duplicate"] = False
+        match = next(
+            (c for c in clusters if _jaccard(toks, c["tokens"]) >= _DEDUP_THRESHOLD),
+            None,
+        )
+        if match is None:
+            clusters.append({"tokens": toks, "primary_idx": i})
+            continue
+        # This is a near-dup of an existing cluster.
+        primary = results[match["primary_idx"]]
+        this_auth = r.get("source_tier") == "authoritative"
+        primary_auth = primary.get("source_tier") == "authoritative"
+        if this_auth and not primary_auth:
+            # Promote the authoritative copy to primary; demote the old one.
+            primary["near_duplicate"] = True
+            r["near_duplicate"] = False
+            match["primary_idx"] = i
+        else:
+            r["near_duplicate"] = True
+    return results
+
+
+def _ddgs_search_sync(
+    query: str,
+    region: str | None,
+    safesearch: str,
+    timelimit: str | None,
+    max_results: int,
+) -> list[dict]:
+    """Synchronous DDGS call — runs in a thread via asyncio.to_thread."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        from duckduckgo_search import DDGS
+        from duckduckgo_search.exceptions import (
+            DuckDuckGoSearchException,
+            RatelimitException,
+            TimeoutException,
+        )
+
+        try:
+            ddgs = DDGS(headers=_DDGS_HEADERS)
+            return ddgs.text(
+                keywords=query,
+                region=region,
+                safesearch=safesearch,
+                timelimit=timelimit,
+                max_results=max_results,
+            ) or []
+        except RatelimitException as exc:
+            raise exc
+        except TimeoutException as exc:
+            raise exc
+        except DuckDuckGoSearchException as exc:
+            raise exc
+
+
+def _map_ddgs_exception(exc: Exception) -> str:
+    """Map DDGS exceptions to StructuredError JSON strings.
+
+    Persona A FRICTION-B1/B2/B3 fix:
+      - Messages are sanitized (raw Bing URLs stripped) inside structured_error.
+      - Hints are search-context-aware (no "check URL" since the caller
+        passed a query, not a URL).
+      - Transient connection errors (DNS / reset) are marked retryable=True
+        so the agent doesn't give up on flaky networks.
+    """
+    try:
+        from duckduckgo_search.exceptions import (
+            DuckDuckGoSearchException,
+            RatelimitException,
+            TimeoutException,
+        )
+    except ImportError:
+        DuckDuckGoSearchException = Exception
+        RatelimitException = type(None)
+        TimeoutException = type(None)
+
+    exc_str = str(exc)
+
+    if isinstance(exc, RatelimitException):
+        return err.structured_error(
+            err.RATE_LIMITED,
+            f"DuckDuckGo rate limit exceeded: {exc_str}",
+            hint_override=(
+                "DuckDuckGo rate-limited this session. Wait 60s, "
+                "or narrow the query with timelimit/region to reduce volume."
+            ),
+        )
+    if isinstance(exc, TimeoutException):
+        return err.structured_error(
+            err.TIMEOUT,
+            f"DuckDuckGo search timed out: {exc_str}",
+            hint_override=(
+                "Search backend timed out. Retry once; "
+                "if it persists, broaden the query terms."
+            ),
+            retryable_override=True,
+        )
+
+    # Generic DDGS error or unexpected: detect transient sub-causes
+    transient = err.is_transient_conn_error(exc_str)
+    if isinstance(exc, DuckDuckGoSearchException):
+        msg = f"DuckDuckGo backend error: {exc_str}"
+    else:
+        msg = f"Unexpected error during search: {exc_str}"
+
+    return err.structured_error(
+        err.CONN_ERROR,
+        msg,
+        hint_override=(
+            "Search backend unreachable (likely transient network/DNS). "
+            "Retry once; if it persists, check query spelling or try broader terms."
+            if transient
+            else "Search backend error. Check query spelling, try broader terms, "
+                 "or call suggest_queries to generate alternative phrasings."
+        ),
+        retryable_override=transient,
+    )

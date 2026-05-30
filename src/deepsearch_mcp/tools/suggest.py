@@ -1,0 +1,245 @@
+"""MCP Tool: suggest_queries — generate diverse search queries to break research dead-ends.
+
+Design rationale:
+  Primary:  DDG Autocomplete API (https://duckduckgo.com/ac/?q=<topic>)
+            Returns real user search patterns, most relevant to the topic.
+  Fallback: Template-based viewpoint-shifting queries (runs always as enrichment).
+            Provides criticism/alternatives/primary-source angles even when
+            autocomplete returns few results or is unavailable.
+
+DDGS v8 has NO built-in suggestions method — only text/news/images/videos.
+The /ac/ endpoint is DDG's public autocomplete API, called directly via curl_cffi.
+
+Output is a deduplicated list of 3–8 query strings ready to pass to search_web.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+from urllib.parse import quote_plus
+
+from mcp.server.fastmcp import FastMCP
+
+from ..core.http import fetch
+from ..core.telemetry import track
+
+mcp = FastMCP("deepsearch-suggest-queries")
+
+_AC_URL = "https://duckduckgo.com/ac/"
+_AC_TIMEOUT = 5  # Fast endpoint; fail quickly and fall back to templates
+
+# Viewpoint-shifting template queries for breaking echo chambers.
+# The "{topic}" placeholder is rendered with smart quoting in _render_topic():
+#   - ≤2 words: wrapped in quotes for precise phrase targeting
+#   - ≥3 words: rendered bare so DDG can apply per-word ranking
+# (a 6-word phrase in quotes would produce zero hits — see Persona A FRICTION-C1)
+#
+# Order matters: temporal freshness is ranked early because most real research
+# tasks are time-bounded (Persona A FRICTION-C3).
+_VIEWPOINT_TEMPLATES = [
+    "{topic} 2025 OR 2026",
+    "{topic} criticism",
+    "{topic} problems limitations",
+    "{topic} alternatives",
+    "{topic} vs",
+    "{topic} site:github.com",
+    "{topic} site:arxiv.org OR site:research.google.com",
+]
+
+# Word count above which quote-wrapping causes empty result sets
+_QUOTE_WORD_LIMIT = 2
+
+# For snippet-based entity extraction (capitalize-word heuristic)
+_PROPER_NOUN_RE = re.compile(r"\b([A-Z][a-zA-Z]{2,}(?:\s+[A-Z][a-zA-Z]{2,})*)\b")
+_STOP_WORDS = frozenset(
+    "The A An In On At To For Of With And Or But Is Are Was Were Be Been"
+    " Being Have Has Had Do Does Did Will Would Could Should May Might Must"
+    " Shall Can This That These Those It Its We They He She You I".split()
+)
+
+
+@mcp.tool()
+@track(tool_name="suggest_queries", primary_input="topic")
+async def suggest_queries(
+    topic: str,
+    context: str | None = None,
+) -> str:
+    """
+    Suggests 3–8 diverse search queries to escape research dead-ends.
+
+    ## USE WHEN
+    - **Stuck in an echo chamber:** last 2+ `search_web` rounds returned the
+      same sources or all praise/criticism with no counter-perspective.
+    - **Initial results are poor:** few hits, or all from low-quality SEO blogs.
+    - **Starting a deep research loop:** call once up-front to pre-plan a
+      diverse query set covering criticism, alternatives, and primary sources.
+
+    ## DO NOT USE WHEN
+    - You already have a clear targeted query → call `search_web` directly.
+    - You need actual results — this tool generates queries, not answers.
+
+    ## PARAMETERS
+    - `topic`: The **core concept** (1–4 words is ideal: "React Server Components",
+      "CRISPR base editing", "MCP servers"). Long phrases (>2 words) will not be
+      quote-wrapped — they will be passed as bare keywords to maximize recall.
+    - `context`: Optional. 1–3 search snippets from results you've already seen.
+      Proper-noun entities are extracted for drill-down queries (e.g. seeing
+      "Stanford" in snippets yields a `"Stanford" <topic>` query).
+
+    ## RETURNS
+    JSON array of 3–8 query strings, ordered by lateral-thinking value:
+    1. DDG autocomplete (real user search patterns), if available
+    2. Temporal-freshness ("2025 OR 2026") — first because most research is time-bound
+    3. Criticism / problems / alternatives — break echo chambers
+    4. Primary-source angles (`site:github.com`, `site:arxiv.org`)
+    5. Entity drill-downs from context
+
+    ## EXAMPLES (Few-Shot)
+
+    Good (short topic, quote-wrapped for precision):
+      topic="CRISPR"
+      → ['"CRISPR" 2025 OR 2026', '"CRISPR" criticism', '"CRISPR" alternatives',
+         '"CRISPR" site:arxiv.org OR site:research.google.com', ...]
+
+    Good (long topic, bare keywords for recall):
+      topic="AI agent memory management"
+      → ["AI agent memory management 2025 OR 2026",
+         "AI agent memory management criticism",
+         "AI agent memory management alternatives",
+         "AI agent memory management site:github.com", ...]
+
+    Good (with context — entity drill-down):
+      topic="fasting", context="Stanford study on metabolism..."
+      → [..., '"Stanford" fasting', ...]
+
+    Bad (full sentence — use search_web instead):
+      topic="what is machine learning"
+    """
+    topic = topic.strip()
+    if not topic:
+        return json.dumps([], ensure_ascii=False)
+
+    # Run autocomplete and template generation concurrently
+    ac_task = asyncio.create_task(_fetch_autocomplete(topic))
+    template_queries = _build_template_queries(topic)
+
+    ac_suggestions = await ac_task
+
+    # Entity extraction from context snippets (optional enrichment).
+    # Quote the entity (proper noun → precision) but leave the topic bare.
+    entity_queries: list[str] = []
+    if context and context.strip():
+        entities = _extract_entities(context)
+        clean_topic = topic.strip().strip('"').strip("'")
+        entity_queries = [f'"{e}" {clean_topic}' for e in entities[:2]]
+
+    # Merge: autocomplete first, then viewpoint templates, then entities
+    combined: list[str] = []
+    seen: set[str] = set()
+
+    def _add(q: str) -> None:
+        normalized = q.strip().lower()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            combined.append(q.strip())
+
+    # AC suggestions (high quality — real user patterns)
+    for q in ac_suggestions:
+        _add(q)
+
+    # Viewpoint templates (always included for research depth)
+    for q in template_queries:
+        _add(q)
+
+    # Entity-based queries from context
+    for q in entity_queries:
+        _add(q)
+
+    # Return 3–8 results
+    output = combined[:8] if len(combined) >= 3 else combined
+    if len(output) < 3:
+        # Ensure minimum 3 by adding basic templates even if duplicates
+        for q in [f"{topic} tutorial", f"{topic} examples", f"{topic} documentation"]:
+            if len(output) >= 3:
+                break
+            if q not in output:
+                output.append(q)
+
+    return json.dumps(output, ensure_ascii=False)
+
+
+def _autocomplete_url(topic: str) -> str:
+    """Build the DDG autocomplete request URL WITH the query term.
+
+    BUG history (found 2026-05-30 by real-usage PDCA): this previously fetched
+    the bare endpoint with no `?q=`, so the topic was never sent — autocomplete
+    silently returned [] forever and the feature was dead. The Stuck Agent
+    tests mocked `_fetch_autocomplete` itself, so they never exercised this.
+
+    NOTE: plain `?q=` returns `[{"phrase": "..."}]` (what the parser expects).
+    Do NOT add `&type=list` — that switches the response to the OpenSearch
+    shape `["query", [...]]`, which the parser can't read (verified live).
+    """
+    return f"{_AC_URL}?q={quote_plus(topic)}"
+
+
+async def _fetch_autocomplete(topic: str) -> list[str]:
+    """Call DDG /ac/ autocomplete endpoint. Returns up to 4 suggestions."""
+    try:
+        resp = await fetch(
+            _autocomplete_url(topic),
+            headers={
+                "Accept": "application/json",
+                "Referer": "https://duckduckgo.com/",
+            },
+            timeout=_AC_TIMEOUT,
+        )
+        if resp.status_code != 200:
+            return []
+        data = json.loads(resp.text)
+        # Response: [{"phrase": "..."}, ...]
+        phrases = [item["phrase"] for item in data if isinstance(item, dict) and "phrase" in item]
+        # Skip the trivial exact-match first result
+        if phrases and phrases[0].lower() == topic.lower():
+            phrases = phrases[1:]
+        return phrases[:4]
+    except Exception:
+        # Best-effort enrichment: any failure (network, JSON, schema) → templates.
+        return []
+
+
+def _render_topic(topic: str) -> str:
+    """Render the topic for template substitution with smart quoting.
+
+    Short topics (≤2 words) are wrapped in quotes for precise targeting.
+    Longer topics are rendered bare to avoid zero-result phrase searches.
+    """
+    clean = topic.strip().strip('"').strip("'")
+    word_count = len(clean.split())
+    if word_count <= _QUOTE_WORD_LIMIT and word_count >= 1:
+        return f'"{clean}"'
+    return clean
+
+
+def _build_template_queries(topic: str) -> list[str]:
+    """Build viewpoint-shifting queries from the topic string."""
+    rendered = _render_topic(topic)
+    return [template.format(topic=rendered) for template in _VIEWPOINT_TEMPLATES]
+
+
+def _extract_entities(context: str) -> list[str]:
+    """Extract proper nouns from context snippets for entity drill-down."""
+    matches = _PROPER_NOUN_RE.findall(context)
+    seen: set[str] = set()
+    entities: list[str] = []
+    for m in matches:
+        words = m.split()
+        # Filter stop words and single words < 4 chars
+        if all(w not in _STOP_WORDS for w in words) and len(m) >= 4:
+            normalized = m.lower()
+            if normalized not in seen:
+                seen.add(normalized)
+                entities.append(m)
+    return entities[:5]
