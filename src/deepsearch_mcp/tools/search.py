@@ -231,8 +231,9 @@ async def search_web(
     _note_search_outcome(failed=False)
 
     # Flag near-duplicate titles (B16) + loose same-story clusters (B19).
+    # Query tokens are excluded from clustering (B28) — they match every result.
     results = _mark_near_duplicates(results)
-    results = _mark_story_clusters(results)
+    results = _mark_story_clusters(results, query=query)
 
     output = json.dumps(results, ensure_ascii=False, indent=None)
 
@@ -402,15 +403,32 @@ def _mark_near_duplicates(results: list[dict]) -> list[dict]:
 # coverage from independent outlets is worth reading across; the id just tells
 # the agent they aren't independent confirmations. A loose false grouping is
 # therefore low-harm (the agent still reads them).
+#
+# B28: in a topic search every result shares the QUERY's tokens by construction
+# (DDG returns matches), so clustering on raw shared tokens collapses the whole
+# result set into one useless mega-cluster (live "EU AI Act enforcement 2026"
+# run: 8/8 in cluster 1). The query's own tokens carry zero story-discrimination
+# signal, so we strip them before comparing. Event coverage still clusters: the
+# shared event entities (e.g. "Google"+"30%") exceed a short query and survive.
 _STORY_MIN_SHARED = 2
+# B28: a candidate cluster covering ≥ this fraction of the result set is topic
+# homogeneity, not a story — suppressed (only when there are ≥ MIN results, so
+# "majority" is meaningful). Genuine same-story *subsets* stay below the cap.
+_STORY_MAX_CLUSTER_FRAC = 0.6
+_STORY_DOMINANCE_MIN_N = 4
 
 
-def _mark_story_clusters(results: list[dict]) -> list[dict]:
+def _mark_story_clusters(results: list[dict], query: str | None = None) -> list[dict]:
     """Assign a `story_cluster` id to groups of ≥2 results that likely report
     the same story (≥ _STORY_MIN_SHARED shared significant title tokens,
-    transitively unioned). Singletons keep story_cluster=None."""
+    transitively unioned). Singletons keep story_cluster=None.
+
+    `query` (B28): its significant tokens are excluded from the comparison — they
+    are shared by every result by construction and would otherwise link the whole
+    set. Omit it (None) to compare raw title tokens (back-compat)."""
     n = len(results)
-    toks = [_title_tokens(r.get("title", "")) for r in results]
+    query_tokens = _title_tokens(query) if query else frozenset()
+    toks = [_title_tokens(r.get("title", "")) - query_tokens for r in results]
     parent = list(range(n))
 
     def find(x: int) -> int:
@@ -433,10 +451,18 @@ def _mark_story_clusters(results: list[dict]) -> list[dict]:
     for i in range(n):
         groups.setdefault(find(i), []).append(i)
 
+    # B28: a cluster covering a large majority of the result set is topic
+    # homogeneity (a single-topic search), not a story — it gives the agent no
+    # differentiation, so suppress it. Only applied once there are enough results
+    # for "majority" to mean something (small sets are left as-is). This is the
+    # backstop for ubiquitous *non-query* topic words that query-exclusion can't
+    # catch (live EU run: "august"/"compliance" chained all 8 → mega-cluster).
+    dominance_cap = _STORY_MAX_CLUSTER_FRAC * n if n >= _STORY_DOMINANCE_MIN_N else n + 1
+
     cid = 0
     for root in sorted(groups):  # root == min member index → stable, ordered ids
         members = groups[root]
-        if len(members) >= 2:
+        if 2 <= len(members) < dominance_cap:
             cid += 1
             for m in members:
                 results[m]["story_cluster"] = cid

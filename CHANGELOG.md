@@ -133,6 +133,19 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Fixed — story_cluster no longer collapses a topic search into one mega-cluster (2026-06-01, B28)
+- `search_web`'s `story_cluster` (B19) gained two guards against single-topic
+  over-clustering: (1) the **search query's own tokens are excluded** from the
+  comparison (they match every result by construction); (2) a **dominance cap**
+  suppresses any cluster covering ≥60% of a result set of ≥4 results — topic
+  homogeneity is not a story and conveys no differentiation.
+- A live "EU AI Act enforcement 2026" run had put 8/8 results in
+  `story_cluster=1`; it now yields 0 clusters (all `null`), while genuine
+  same-event subsets embedded in a diverse result set still cluster. Surfaced —
+  and verified — by live dogfooding (query-exclusion alone proved insufficient
+  on real data; the dominance cap is the backstop). Tests:
+  `TestB28QueryAwareClustering`.
+
 ### Fixed — status.py no longer lists a declined backlog row as "next" (2026-06-01, B27)
 - `scripts/status.py` `next_backlog()` now skips `Declined` rows (a recorded
   won't-do is not actionable work), in addition to `DONE`/struck rows — B10 had

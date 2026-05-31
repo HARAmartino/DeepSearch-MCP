@@ -36,6 +36,7 @@ Each entry carries one status tag:
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [Exclude the signal shared by construction before clustering — and let the live run, not fixtures, be the verdict](#2026-06-01-active-exclude-the-signal-shared-by-construction-before-clustering--and-let-the-live-run-not-fixtures-be-the-verdict) |
 | 2026-06-01 | [ACTIVE] | [An orientation tool must show only ACTIONABLE state — and its edge cases hide until the happy path is exhausted](#2026-06-01-active-an-orientation-tool-must-show-only-actionable-state--and-its-edge-cases-hide-until-the-happy-path-is-exhausted) |
 | 2026-06-01 | [ACTIVE] | [Detect silent drift with a metric you already store + a sample-size guard so it can't cry wolf](#2026-06-01-active-detect-silent-drift-with-a-metric-you-already-store--a-sample-size-guard-so-it-cant-cry-wolf) |
 | 2026-06-01 | [ACTIVE] | [A single snapshot describes; a diff judges — build the before/after view for release questions](#2026-06-01-active-a-single-snapshot-describes-a-diff-judges--build-the-beforeafter-view-for-release-questions) |
@@ -79,6 +80,41 @@ Each entry carries one status tag:
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] Exclude the signal shared by construction before clustering — and let the live run, not fixtures, be the verdict
+
+- **Context (B28).** `story_cluster` (B19) grouped results by shared title
+  tokens. In a topic search, *every* result shares the query terms by
+  construction (DDG returns matches), so the whole set collapsed into one useless
+  cluster — a live "EU AI Act enforcement 2026" run put 8/8 in cluster 1.
+- **Rule 1.** **A feature that matches by shared signal must first remove the
+  signal shared *by construction*.** The query tokens carry zero discrimination
+  value within a result set whose membership was *defined* by them. Subtract them
+  before comparing.
+- **But that alone was not enough — and the live run, not my tests, exposed it.**
+  Query-exclusion passed a synthetic test I wrote, yet the live re-run STILL
+  showed 8/8 in one cluster: the real titles shared ubiquitous *non-query* topic
+  words ("august", "compliance") that re-chained everything. My fixture was
+  unrepresentative *again* (the recurring trap). **Rule 2: when a heuristic ships
+  with an "verify live" caveat, the live run is the test — and a green synthetic
+  test is not permission to skip it.**
+- **The robust backstop is mechanism-agnostic.** Rather than chase every way
+  tokens can over-link, suppress the *outcome*: a cluster covering a majority of
+  a sizable result set conveys no differentiation, so don't emit it — regardless
+  of *why* it formed. This kills the mega-cluster whatever the shared tokens are.
+  (DF down-weighting was still rejected: it would un-cluster a small/pure
+  same-event set, whose entities are ubiquitous *because* it's one event. The
+  dominance cap only triggers on majorities of ≥4-result sets, so the event case
+  is safe.)
+- **The cache masked the first re-verification.** `search_web` caches the full
+  output JSON (incl. `story_cluster`), so the post-fix re-run returned the *stale*
+  pre-fix values and looked unchanged. **When live-verifying a change to enriched
+  output, clear the cache (fresh `DEEPSEARCH_CACHE_DIR`) or you're testing the old
+  code.**
+- **Mechanism / tests:** `tools/search.py::_mark_story_clusters(results, query=)`
+  + `_STORY_MAX_CLUSTER_FRAC`/`_STORY_DOMINANCE_MIN_N`; `TestB28QueryAwareClustering`
+  (homogeneous set suppressed, query-token isolation, subset preserved,
+  small-event still clusters, back-compat). Verified live: EU run 8/8→0 clusters.
 
 ### [2026-06-01] [ACTIVE] An orientation tool must show only ACTIONABLE state — and its edge cases hide until the happy path is exhausted
 

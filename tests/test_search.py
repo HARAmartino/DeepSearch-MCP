@@ -1027,3 +1027,72 @@ class TestB19StoryClusters:
         data = json.loads(await search_web(query="b19 integ"))
         assert "story_cluster" in data[0]
         assert data[0]["story_cluster"] == data[1]["story_cluster"] is not None
+
+
+class TestB28QueryAwareClustering:
+    """B28: a single-topic search must not collapse into one mega-cluster. Two
+    mechanisms: (1) exclude the query's own tokens (shared by construction);
+    (2) suppress a cluster covering a majority of the result set (topic
+    homogeneity, not a story). Genuine same-event subsets still cluster."""
+
+    def _cluster(self, titles, query=None):
+        from src.deepsearch_mcp.tools.search import _mark_story_clusters
+        rows = [{"title": t, "source_tier": "unknown", "near_duplicate": False,
+                 "story_cluster": None} for t in titles]
+        return [r["story_cluster"] for r in _mark_story_clusters(rows, query=query)]
+
+    def test_homogeneous_topic_set_not_mega_clustered(self):
+        # Real EU AI Act titles: same topic, different angles. No single cluster
+        # may cover the whole set (the live 8/8 mega-cluster bug).
+        eu = [
+            "EU AI Act 2026 Updates: Compliance Requirements and Business Risks",
+            "EU AI Act August 2026 Deadline: Only 8 of 27 EU States Ready",
+            "EU AI Act Enforcement Begins August 2026: What Gets Banned and Who",
+            "EU AI Act: What's in Force Now and What Hits August 2026",
+            "EU AI Act Enforcement Timeline: 2025 to 2027",
+        ]
+        cids = self._cluster(eu, query="EU AI Act enforcement 2026")
+        non_null = [c for c in cids if c is not None]
+        top = max((non_null.count(c) for c in set(non_null)), default=0)
+        assert top < len(cids), f"still mega-clustered: {cids}"
+
+    def test_dominant_cluster_suppressed(self):
+        # 5 titles all sharing 2 NON-query tokens → would all cluster, but the
+        # cluster is the whole set (≥0.6·n) → suppressed. Reproduces the live
+        # failure mechanism (ubiquitous topic words query-exclusion can't catch).
+        titles = [f"Alpha Beta dispatch number {i} distinct{i}" for i in range(5)]
+        assert self._cluster(titles) == [None] * 5
+
+    def test_query_tokens_do_not_link(self):
+        # Two results sharing ONLY query tokens are not linked (n<4, so dominance
+        # is not the cause — this isolates query-token exclusion).
+        titles = ["EU AI Act overview alpha widgets",
+                  "EU AI Act overview beta gadgets"]
+        assert self._cluster(titles, query="EU AI Act overview") == [None, None]
+
+    def test_genuine_subcluster_preserved_in_diverse_set(self):
+        # An event pair embedded among unrelated results stays a cluster
+        # (size 2 < 0.6·6) — the dominance cap only kills majorities.
+        titles = [
+            "DuckDuckGo installs surge after Google rollout",          # event
+            "DuckDuckGo install spike follows Google rollout report",  # event
+            "Senate passes sweeping climate budget bill",
+            "Mars rover finds ancient organic molecules",
+            "New flagship phone unveiled at hardware showcase",
+            "Stock markets rally on strong jobs figures",
+        ]
+        cids = self._cluster(titles)
+        assert cids[0] is not None and cids[0] == cids[1]
+        assert cids[2:] == [None, None, None, None]
+
+    def test_small_event_set_still_clusters(self):
+        # Below the dominance-N floor, a genuine same-event pair still clusters.
+        titles = ["DuckDuckGo installs surge Google rollout",
+                  "DuckDuckGo install spike Google rollout"]
+        cids = self._cluster(titles, query="DuckDuckGo")
+        assert cids[0] is not None and cids[0] == cids[1]
+
+    def test_query_none_is_backcompat(self):
+        titles = ["Mars rover finds organic molecules in sample",
+                  "Perseverance rover sample shows ancient organic molecules"]
+        assert self._cluster(titles) == [1, 1]
