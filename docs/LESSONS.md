@@ -41,6 +41,7 @@ rest are <1 week old and genuinely load-bearing. (Prev: 2026-05-29.)
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [Weight tokens by signal, not count — and a year/boilerplate token is not a story identifier](#2026-06-01-active-weight-tokens-by-signal-not-count--and-a-yearboilerplate-token-is-not-a-story-identifier) |
 | 2026-06-01 | [ACTIVE] | [A query-generating tool is language-blind by default — localize the WORDS, keep the operators](#2026-06-01-active-a-query-generating-tool-is-language-blind-by-default--localize-the-words-keep-the-operators) |
 | 2026-06-01 | [ACTIVE] | [A "primary source" is domain-relative — adapt the angle to the topic, and match signals at word level](#2026-06-01-active-a-primary-source-is-domain-relative--adapt-the-angle-to-the-topic-and-match-signals-at-word-level) |
 | 2026-06-01 | [ACTIVE] | [`re.IGNORECASE` silently defeats a `[A-Z]` capital-letter intent — scope case with `(?-i:…)`; and a benchmark earns its keep by surfacing exactly this](#2026-06-01-active-reignorecase-silently-defeats-a-a-z-capital-letter-intent--scope-case-with---i--and-a-benchmark-earns-its-keep-by-surfacing-exactly-this) |
@@ -89,6 +90,37 @@ rest are <1 week old and genuinely load-bearing. (Prev: 2026-05-29.)
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] Weight tokens by signal, not count — and a year/boilerplate token is not a story identifier
+
+- **Context (B33).** Title clustering used "≥2 shared tokens". Fine for Latin
+  words, wrong for CJK: B22 tokenizes Japanese into 2-char bigrams, which are
+  far lower-entropy than a 5+-char English word, so two *unrelated* Japanese
+  titles share ≥2 by coincidence (テッ/ック both come from テック⊂マテック).
+- **Rule 1 — weight by entropy, don't count.** When a similarity signal mixes
+  high- and low-entropy tokens, a flat count over-weights the low-entropy ones.
+  Weight them: a Latin word = 1.0, a CJK bigram = 0.5, so "2 words ≈ 4 bigrams"
+  of evidence. Same threshold, signal-proportionate.
+- **Rule 2 — strip tokens that are shared by *everything in the genre*.** Years
+  ("2025") and counts ("100") are listicle boilerplate, not story identifiers; a
+  shared year says nothing about two articles being the same story (in any
+  language). Give them zero weight. (Cf. B28: strip the query tokens; here: strip
+  the boilerplate tokens. Both remove signal that's shared by construction.)
+- **Whack-a-mole, stopped honestly.** The first fix (weighting) passed a synthetic
+  test but the live re-run surfaced a *second* false cluster (3 listicles via
+  year+最新) — the fixtures-vs-reality trap, twice in one cycle. The digit fix
+  closed it. I stopped there rather than chasing CJK stopword lists: story_cluster
+  is a *low-harm soft* signal, weighting + boilerplate-stripping clears every
+  observed false cluster, and further tuning is diminishing returns (B25:
+  curated lists are structurally incomplete). Know when "conservative enough"
+  beats "perfect".
+- **Live, fresh-cache verification is mandatory here.** Both false clusters only
+  appeared on real result sets (`DEEPSEARCH_CACHE_DIR=$(mktemp -d)` to bypass the
+  cached enriched JSON — the B28 cache-masking trap). The synthetic test fixture
+  even over-shared content ("選び方") and had to be corrected to match the real
+  shared-token profile.
+- **Mechanism / tests:** `tools/search.py::_shared_signal` (`_CJK_TOKEN_WEIGHT`,
+  digit skip) + `tests/test_search.py::TestB33CjkClusterWeighting`.
 
 ### [2026-06-01] [ACTIVE] A query-generating tool is language-blind by default — localize the WORDS, keep the operators
 

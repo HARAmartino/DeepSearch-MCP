@@ -133,6 +133,20 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Fixed — story_cluster no longer over-links Japanese titles on low-signal tokens (2026-06-01, B33)
+- `story_cluster` (B19/B28) used a flat "≥2 shared title tokens". For CJK that
+  over-clustered: a character bigram is far lower-entropy than a Latin word, so
+  unrelated Japanese titles shared ≥2 by coincidence (a live JP run linked a
+  gadget roundup with a brand explainer via 人気 + テッ + ック, where テッ/ック
+  both come from テック⊂マテック). Shared tokens are now **weighted** — Latin
+  word 1.0, CJK bigram 0.5 — so it takes ~4 shared bigrams (not 2) to link CJK
+  titles. English clustering is unchanged.
+- Also: **pure-digit tokens (years like `2025`, counts like `100`) carry zero
+  weight** — a second live run linked three unrelated "2025年最新…" listicles via
+  `2025`+`最新`. A shared year is boilerplate, not a story identifier (true for
+  English too). Verified live: the JP run now yields 0 false clusters while
+  genuine same-story coverage still clusters. Tests: `TestB33CjkClusterWeighting`.
+
 ### Changed — suggest_queries viewpoint angles are now language-adaptive (2026-06-01, B32)
 - `suggest_queries` appended English viewpoint words ("criticism", "alternatives",
   "problems limitations", "vs") to every topic — so a Japanese query got English

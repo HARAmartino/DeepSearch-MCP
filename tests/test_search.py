@@ -1096,3 +1096,71 @@ class TestB28QueryAwareClustering:
         titles = ["Mars rover finds organic molecules in sample",
                   "Perseverance rover sample shows ancient organic molecules"]
         assert self._cluster(titles) == [1, 1]
+
+
+class TestB33CjkClusterWeighting:
+    """B33: CJK bigrams are low-entropy, so unrelated Japanese titles share ≥2 by
+    coincidence. Shared tokens are weighted (Latin 1.0, CJK ≤2-char 0.5), so it
+    takes ~4 shared bigrams (not 2) to link CJK titles. English is unchanged."""
+
+    def _cluster(self, titles, query=None):
+        from src.deepsearch_mcp.tools.search import _mark_story_clusters
+        rows = [{"title": t, "source_tier": "unknown", "near_duplicate": False,
+                 "story_cluster": None} for t in titles]
+        return [r["story_cluster"] for r in _mark_story_clusters(rows, query=query)]
+
+    def test_coincidental_cjk_overlap_not_clustered(self):
+        # The real JP run's false pair: a gizmodo roundup + a Matech explainer.
+        # They share only 人気 + テッ + ック (テッ/ック ⊂ テック⊂マテック) = weight
+        # 1.5 < 2.0 → must NOT cluster.
+        titles = [
+            "今年ギズで人気だった信頼度MAXな国産ガジェット・テックまとめ",
+            "MATECH (マテック) はどこの国のメーカー？京都発、薄型・高機能ガジェットの人気の秘密を徹底解説",
+        ]
+        assert self._cluster(titles, query="日本 新興 ガジェット メーカー") == [None, None]
+
+    def test_genuine_cjk_same_story_still_clusters(self):
+        # Two paraphrases of one event share many content bigrams (三笘/決勝/ゴール/
+        # ブライトン/逆転/勝利) → weight ≥ 2.0 → still clustered.
+        titles = [
+            "三笘薫がブライトンで決勝ゴール、逆転勝利を演出",
+            "三笘薫の決勝ゴールでブライトンが逆転勝利",
+        ]
+        cids = self._cluster(titles)
+        assert cids[0] is not None and cids[0] == cids[1], f"real JP cluster lost: {cids}"
+
+    def test_shared_signal_weighting(self):
+        from src.deepsearch_mcp.tools.search import _shared_signal
+        # Two Latin words = 2.0; two CJK bigrams = 1.0; mixed sums.
+        assert _shared_signal(frozenset({"google", "rollout"}),
+                              frozenset({"google", "rollout"})) == 2.0
+        assert _shared_signal(frozenset({"人気", "テッ"}),
+                              frozenset({"人気", "テッ"})) == 1.0
+        assert _shared_signal(frozenset({"google", "人気"}),
+                              frozenset({"google", "人気"})) == 1.5
+
+    def test_year_and_count_digits_carry_no_weight(self):
+        from src.deepsearch_mcp.tools.search import _shared_signal
+        # Years/counts are boilerplate, not story IDs → 0 weight.
+        assert _shared_signal(frozenset({"2025", "100"}),
+                              frozenset({"2025", "100"})) == 0.0
+        assert _shared_signal(frozenset({"2025", "最新", "年最"}),
+                              frozenset({"2025", "最新", "年最"})) == 1.0  # only the 2 bigrams
+
+    def test_listicles_sharing_only_year_boilerplate_not_clustered(self):
+        # The 2nd live JP failure: unrelated "2025年最新…" listicles linked only by
+        # 2025+最新 boilerplate. They share just {年最, 最新} (=1.0) once the year
+        # is dropped → must NOT cluster. (Titles share no real content bigrams.)
+        titles = [
+            "2025年最新版 すごいベンチャー100社掲載",
+            "2025年最新 家電のランキング徹底比較",
+            "2025年最新 モバイルバッテリーとイヤホンのおすすめ",
+        ]
+        assert self._cluster(titles, query="日本 新興 ガジェット メーカー") == [None, None, None]
+
+    def test_english_clustering_unchanged(self):
+        # Two shared Latin words still cluster (weight 2.0) — B19/B28 unaffected.
+        titles = ["DuckDuckGo installs surge Google rollout",
+                  "DuckDuckGo install spike Google rollout"]
+        cids = self._cluster(titles, query="DuckDuckGo")
+        assert cids[0] is not None and cids[0] == cids[1]

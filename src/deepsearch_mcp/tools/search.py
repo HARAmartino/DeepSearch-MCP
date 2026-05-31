@@ -410,7 +410,36 @@ def _mark_near_duplicates(results: list[dict]) -> list[dict]:
 # run: 8/8 in cluster 1). The query's own tokens carry zero story-discrimination
 # signal, so we strip them before comparing. Event coverage still clusters: the
 # shared event entities (e.g. "Google"+"30%") exceed a short query and survive.
-_STORY_MIN_SHARED = 2
+#
+# B33: shared tokens are WEIGHTED, not counted. A CJK character bigram (B22's
+# dependency-free tokenization) is 2 chars from a small alphabet — far lower
+# entropy than a Latin word, so unrelated Japanese titles share ≥2 bigrams by
+# coincidence (live JP run linked a roundup with a brand explainer via 人気 +
+# テッ + ック, where テッ/ック both come from テック⊂マテック). Weight a Latin
+# word (≥3 chars) 1.0 and a CJK token (≤2 chars) 0.5: clustering needs the
+# `_STORY_MIN_SHARED` *weight*, i.e. 2 Latin words OR 4 CJK bigrams. English is
+# unchanged; coincidental CJK overlap no longer links.
+_STORY_MIN_SHARED = 2.0
+_CJK_TOKEN_WEIGHT = 0.5  # a 2-char bigram is half a Latin word's worth of signal
+
+
+def _shared_signal(a: frozenset[str], b: frozenset[str]) -> float:
+    """Weighted overlap of two token sets (B33).
+
+    - Latin word (≥3 chars) → 1.0; CJK token (≤2 chars) → 0.5 — a low-entropy
+      bigram is half a word's worth of signal.
+    - Pure-digit tokens (years like ``2025``, counts like ``100``) → 0.0: they
+      are generic boilerplate common to every listicle, not story identifiers.
+      A live JP run linked 3 unrelated "2025年最新…" listicles via ``2025``+
+      ``最新`` until years stopped counting. (Correct for English too — two
+      articles sharing a year are not therefore the same story.)
+    """
+    total = 0.0
+    for t in a & b:
+        if t.isdigit():
+            continue
+        total += 1.0 if len(t) >= 3 else _CJK_TOKEN_WEIGHT
+    return total
 # B28: a candidate cluster covering ≥ this fraction of the result set is topic
 # homogeneity, not a story — suppressed (only when there are ≥ MIN results, so
 # "majority" is meaningful). Genuine same-story *subsets* stay below the cap.
@@ -444,7 +473,7 @@ def _mark_story_clusters(results: list[dict], query: str | None = None) -> list[
 
     for i in range(n):
         for j in range(i + 1, n):
-            if len(toks[i] & toks[j]) >= _STORY_MIN_SHARED:
+            if _shared_signal(toks[i], toks[j]) >= _STORY_MIN_SHARED:
                 union(i, j)
 
     groups: dict[int, list[int]] = {}
