@@ -361,6 +361,7 @@ DeepSearch-MCP/
 │   ├── calibrate_judge.py        # B1: judge-vs-consumer correlation check
 │   ├── simulate_research.py      # E2E ReAct loop simulation
 │   ├── analyze_telemetry.py      # Day 2 ops: usage analysis + alerts
+│   ├── telemetry_diff.py         # B4: before/after release diff of two telemetry.db
 │   ├── dogfood_research.py       # real-tool research harness + noise audit
 │   ├── dogfood_regression.py     # golden-baseline extraction regression
 │   ├── dogfood_audit.py          # residual-noise auditor

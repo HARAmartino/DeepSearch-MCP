@@ -36,6 +36,7 @@ Each entry carries one status tag:
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [A single snapshot describes; a diff judges — build the before/after view for release questions](#2026-06-01-active-a-single-snapshot-describes-a-diff-judges--build-the-beforeafter-view-for-release-questions) |
 | 2026-06-01 | [ACTIVE] | [Match the signal's mechanism to its meaning — "skip" vs "corroborate" are opposite affordances](#2026-06-01-active-match-the-signals-mechanism-to-its-meaning--skip-vs-corroborate-are-opposite-affordances) |
 | 2026-06-01 | [ACTIVE] | [Derive a missing signal from the highest-precision source you have, not every source](#2026-06-01-active-derive-a-missing-signal-from-the-highest-precision-source-you-have-not-every-source) |
 | 2026-05-31 | [ACTIVE] | [An error hint must scale with evidence — a recovery action futile at scale shouldn't be the advice](#2026-05-31-active-an-error-hint-must-scale-with-evidence--a-recovery-action-futile-at-scale-shouldnt-be-the-advice) |
@@ -76,6 +77,26 @@ Each entry carries one status tag:
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] A single snapshot describes; a diff judges — build the before/after view for release questions
+
+- **Context (B4).** `analyze_telemetry.py` reports on *one* `telemetry.db` — it
+  describes the current state but can't answer the question releases actually
+  raise: *did this change make things better or worse?* That needs a before/after
+  **diff** of two snapshots (success rate, tokens/call, latency, error-code mix).
+- **Rule.** **A metric reported in isolation describes; the same metric diffed
+  against a baseline judges.** When the decision is "ship/rollback" or "did my
+  patch help", build the comparison view, don't make a human eyeball two separate
+  reports. Deltas + a short list of regressions (success-rate drop, a brand-new
+  error code) turn raw numbers into a verdict.
+- **Carry the guards forward, don't re-derive trust.** The diff reuses the same
+  cold-start `MIN_ROWS_FOR_CONFIDENCE` guard as the single-snapshot analyzer: a
+  diff over thin data is a thin-data swing, not a signal. A new tool that sits on
+  an existing metric should inherit that metric's honesty guards (PROVISIONAL),
+  not silently present low-confidence deltas as fact.
+- **Mechanism / tests:** `evals/telemetry_diff.py` (`snapshot_metrics`,
+  `diff_snapshots`, `build_diff`) + `tests/test_telemetry_diff.py`. Unblocks B6
+  (extraction-length drift is an alert layered on this diff).
 
 ### [2026-06-01] [ACTIVE] Match the signal's mechanism to its meaning — "skip" vs "corroborate" are opposite affordances
 

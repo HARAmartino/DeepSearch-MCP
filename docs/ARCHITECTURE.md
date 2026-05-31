@@ -167,6 +167,12 @@ has **two complementary probes**:
 They cover each other's blind spots: telemetry sees *how often* but never *what
 text*; the auditor sees *what text* but only on the dogfood corpus.
 
+A third, **inter-release** view sits on top: `evals/telemetry_diff.py --before A
+--after B` diffs two `telemetry.db` snapshots (success rate, tokens/call,
+latency, error-code churn) so a release can be judged better-or-worse, not just
+described in isolation. It carries the same PROVISIONAL guard as the aggregate
+probe. Operations Rule 6 (extraction-length drift) is built on this diff.
+
 ```mermaid
 flowchart LR
     Plan[Plan] --> Do[Do]

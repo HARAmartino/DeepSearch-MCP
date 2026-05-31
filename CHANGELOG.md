@@ -133,6 +133,16 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Added — telemetry_diff.py: before/after release comparison (2026-06-01, B4)
+- `evals/telemetry_diff.py --before A.db --after B.db` diffs two telemetry
+  snapshots and reports per-tool + overall deltas (success rate, tokens/call,
+  latency) plus error-code churn, with regression findings (success-rate drop,
+  new error codes). `--json` for machine output. Answers "did this release help
+  or hurt?" — which the single-snapshot `analyze_telemetry.py` cannot.
+- Carries the same cold-start guard: if either snapshot is below the row floor,
+  the diff is labelled PROVISIONAL (don't act on a thin-data swing).
+- Tests: `tests/test_telemetry_diff.py`.
+
 ### Added — story_cluster corroboration signal on search results (2026-06-01, B19)
 - New `SearchResult.story_cluster` field: an integer id grouping results that
   report the **same story across different outlets**. It links paraphrased
