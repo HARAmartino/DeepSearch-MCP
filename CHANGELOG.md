@@ -133,6 +133,19 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Added — DeepSearch Quality Score (DQS) benchmark (2026-06-01, B30)
+- `evals/benchmark.py` produces a single composite **0–100 quality score** for
+  the whole server, like an LLM benchmark: a fixed, offline, deterministic
+  battery, reproducible release-over-release. It composes the project's already-
+  validated measures rather than inventing new ones — extraction (eval_judge
+  gauntlet, 40%), cleanliness (residual-noise auditor, 20%), robustness
+  (structured-error contract, 25%), diversity (suggest_queries reserved angles,
+  15%). Baseline **DQS = 92.9/100**.
+- `python evals/benchmark.py [--json]`. Documented as a regression north-star /
+  release trend, explicitly **not** a substitute for live dogfooding (it's a
+  proxy over fixtures). A regression floor is pinned by `tests/test_benchmark.py`
+  and the monthly cadence (`docs/METHODOLOGY.md` §6) records the DQS each release.
+
 ### Fixed — story_cluster no longer collapses a topic search into one mega-cluster (2026-06-01, B28)
 - `search_web`'s `story_cluster` (B19) gained two guards against single-topic
   over-clustering: (1) the **search query's own tokens are excluded** from the

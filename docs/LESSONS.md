@@ -36,6 +36,7 @@ Each entry carries one status tag:
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [A composite benchmark should compose validated measures, not invent metrics — and must carry its own "proxy, not proof" caveat](#2026-06-01-active-a-composite-benchmark-should-compose-validated-measures-not-invent-metrics--and-must-carry-its-own-proxy-not-proof-caveat) |
 | 2026-06-01 | [ACTIVE] | [Exclude the signal shared by construction before clustering — and let the live run, not fixtures, be the verdict](#2026-06-01-active-exclude-the-signal-shared-by-construction-before-clustering--and-let-the-live-run-not-fixtures-be-the-verdict) |
 | 2026-06-01 | [ACTIVE] | [An orientation tool must show only ACTIONABLE state — and its edge cases hide until the happy path is exhausted](#2026-06-01-active-an-orientation-tool-must-show-only-actionable-state--and-its-edge-cases-hide-until-the-happy-path-is-exhausted) |
 | 2026-06-01 | [ACTIVE] | [Detect silent drift with a metric you already store + a sample-size guard so it can't cry wolf](#2026-06-01-active-detect-silent-drift-with-a-metric-you-already-store--a-sample-size-guard-so-it-cant-cry-wolf) |
@@ -80,6 +81,35 @@ Each entry carries one status tag:
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] A composite benchmark should compose validated measures, not invent metrics — and must carry its own "proxy, not proof" caveat
+
+- **Context (B30).** Asked for a single "how good is DeepSearch-MCP" number (an
+  LLM-benchmark-style score). Quality was real but scattered (gauntlet,
+  calibration, dogfood, telemetry). Built `evals/benchmark.py` → DeepSearch
+  Quality Score (DQS, 0–100, baseline 92.9).
+- **Rule.** **A capstone metric should *compose already-validated sub-measures*,
+  not introduce new unvalidated ones.** Each DQS component maps to a measure that
+  earned trust on its own (eval_judge gauntlet B0/B1, the noise auditor, the
+  structured-error contract, B11's reserved angles). A composite built from fresh
+  ad-hoc metrics would just be a new unvalidated number wearing a confident
+  0–100 costume.
+- **Make a composite deterministic & offline, like a benchmark.** Fixed fixtures,
+  mocked autocomplete, pure error builders → same score every run → it can be a
+  release-over-release *trend* and a regression floor. A non-deterministic
+  "score" can't be tracked or gated.
+- **Weights are a judgment call — make them explicit, not buried.** They encode
+  mission priority (extraction core, robustness a Prime Directive). Putting them
+  in one visible `WEIGHTS` dict + the docstring means changing them is a
+  reviewable decision, not a silent re-weighting that moves the number.
+- **A single number invites Goodhart — ship the caveat *with* the metric.** DQS
+  is a proxy over fixtures (anti-pattern #4 / "fixtures aren't real usage"): it
+  cannot see what live dogfooding sees. The tool's own output and docs state
+  "necessary, not sufficient; don't optimize the number" — the honesty guard
+  travels with the score so a future reader can't mistake 92.9 for "ships great".
+- **Mechanism / tests:** `evals/benchmark.py` (`run_benchmark`, `WEIGHTS`,
+  four `score_*`) + `tests/test_benchmark.py` (composition, determinism,
+  regression floor, CLI).
 
 ### [2026-06-01] [ACTIVE] Exclude the signal shared by construction before clustering — and let the live run, not fixtures, be the verdict
 

@@ -317,7 +317,16 @@ uv run python evals/simulate_research.py --demo
 
 # Run quality eval (live network)
 uv run python evals/simulate_research.py
+
+# DeepSearch Quality Score — one composite 0–100 number, offline & deterministic
+uv run python evals/benchmark.py
 ```
+
+**DeepSearch Quality Score (DQS).** `evals/benchmark.py` rolls the project's
+validated measures into a single 0–100 score (extraction 40% · cleanliness 20% ·
+robustness 25% · diversity 15%), reproducible release-over-release like an LLM
+benchmark. It is a **proxy over fixtures** — a regression north-star, *not* a
+substitute for live dogfooding (`scripts/research.py`, `scripts/live_check.py`).
 
 ### Test Coverage
 
@@ -358,6 +367,7 @@ DeepSearch-MCP/
 │                           # propose_noise_regex.py · research.py
 ├── evals/
 │   ├── eval_judge.py             # Quality scorer (0–10, 3 axes)
+│   ├── benchmark.py              # DeepSearch Quality Score (DQS 0–100, composite)
 │   ├── calibrate_judge.py        # B1: judge-vs-consumer correlation check
 │   ├── simulate_research.py      # E2E ReAct loop simulation
 │   ├── analyze_telemetry.py      # Day 2 ops: usage analysis + alerts

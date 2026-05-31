@@ -173,6 +173,12 @@ latency, error-code churn) so a release can be judged better-or-worse, not just
 described in isolation. It carries the same PROVISIONAL guard as the aggregate
 probe. Operations Rule 6 (extraction-length drift) is built on this diff.
 
+Above all of these, `evals/benchmark.py` computes the **DeepSearch Quality Score
+(DQS, 0–100)** — a fixed, offline, deterministic composite (extraction /
+cleanliness / robustness / diversity) that rolls the validated quality measures
+into one release-trackable number. It is a *proxy over fixtures* (a regression
+north-star), explicitly not a replacement for the live probes above.
+
 ```mermaid
 flowchart LR
     Plan[Plan] --> Do[Do]
