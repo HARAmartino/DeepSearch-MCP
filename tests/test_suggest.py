@@ -583,3 +583,50 @@ class TestReservedSlotsB11:
         mock_ac.return_value = ["Sam Altman OpenAI"]
         data = _parse_suggestions(await suggest_queries(topic="Sam Altman"))
         assert data[0] == "Sam Altman OpenAI", f"AC should still lead; got {data[0]!r}"
+
+
+class TestB29DomainAdaptivePrimarySource:
+    """B29: the guaranteed primary-source angle adapts to the topic domain —
+    policy/legal/gov topics reach official sources, not GitHub. The live EU AI
+    Act run found 0 authoritative results and no path to eur-lex/europa.eu."""
+
+    @patch("src.deepsearch_mcp.tools.suggest._fetch_autocomplete", new_callable=AsyncMock)
+    async def test_policy_topic_gets_official_sources(self, mock_ac):
+        mock_ac.return_value = []
+        data = _parse_suggestions(await suggest_queries(topic="EU AI Act enforcement"))
+        combined = " ".join(data).lower()
+        assert "europa.eu" in combined or "site:.gov" in combined, (
+            f"policy topic should reach official sources, got: {data}"
+        )
+        assert "github" not in combined, f"policy topic should not default to github: {data}"
+
+    @patch("src.deepsearch_mcp.tools.suggest._fetch_autocomplete", new_callable=AsyncMock)
+    async def test_dev_topic_keeps_github(self, mock_ac):
+        mock_ac.return_value = []
+        data = _parse_suggestions(await suggest_queries(topic="React Server Components"))
+        combined = " ".join(data).lower()
+        assert "github" in combined, f"dev topic should keep github primary source: {data}"
+        assert "europa.eu" not in combined
+
+    def test_word_level_match_does_not_misclassify_react(self):
+        # "React" contains the substring "act" — must NOT be read as policy.
+        from src.deepsearch_mcp.tools.suggest import (
+            _PRIMARY_SOURCE_DEV,
+            _PRIMARY_SOURCE_OFFICIAL,
+            _primary_source_template,
+        )
+        assert _primary_source_template("React Server Components") == _PRIMARY_SOURCE_DEV
+        assert _primary_source_template("transaction batching") == _PRIMARY_SOURCE_DEV
+        assert _primary_source_template("EU AI Act") == _PRIMARY_SOURCE_OFFICIAL
+        assert _primary_source_template("GDPR compliance fines") == _PRIMARY_SOURCE_OFFICIAL
+
+    @patch("src.deepsearch_mcp.tools.suggest._fetch_autocomplete", new_callable=AsyncMock)
+    async def test_policy_still_has_criticism_and_is_capped(self, mock_ac):
+        # The B11 guarantees must still hold for the adaptive path.
+        mock_ac.return_value = ["EU AI Act news", "EU AI Act summary",
+                                "EU AI Act text", "EU AI Act fines"]
+        data = _parse_suggestions(await suggest_queries(topic="EU AI Act"))
+        combined = " ".join(data).lower()
+        assert "criticism" in combined
+        assert "site:" in combined  # primary-source angle survived the AC cap
+        assert 3 <= len(data) <= 8

@@ -133,6 +133,19 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Changed — suggest_queries primary-source angle is now domain-adaptive (2026-06-01, B29)
+- `suggest_queries` previously always offered `site:github.com` as its
+  guaranteed primary-source angle — useless for policy/legal/government
+  research, where the primary source is official sites. A live "EU AI Act
+  enforcement" run found 0 authoritative results and no path to
+  `eur-lex.europa.eu`. The angle now adapts to the topic: policy/legal/gov topics
+  get `site:.gov OR site:europa.eu OR site:.int`; all other topics keep
+  `site:github.com` (dev/code default).
+- Detection is word-level so substrings don't misfire ("React" is not "act").
+  The B11 reserve-and-cap guarantees (≥1 criticism + ≥1 primary-source always
+  survive autocomplete) still hold. Tests:
+  `tests/test_suggest.py::TestB29DomainAdaptivePrimarySource`.
+
 ### Fixed — dogfood_audit byline heuristic no longer false-positives on prose (2026-06-01, B31)
 - The `METADATA_STUB` byline pattern (`by\s+[A-Z]`) was compiled with
   `re.IGNORECASE`, so `[A-Z]` matched *any* letter — flagging ordinary prose

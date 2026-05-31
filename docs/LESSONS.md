@@ -36,6 +36,7 @@ Each entry carries one status tag:
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [A "primary source" is domain-relative — adapt the angle to the topic, and match signals at word level](#2026-06-01-active-a-primary-source-is-domain-relative--adapt-the-angle-to-the-topic-and-match-signals-at-word-level) |
 | 2026-06-01 | [ACTIVE] | [`re.IGNORECASE` silently defeats a `[A-Z]` capital-letter intent — scope case with `(?-i:…)`; and a benchmark earns its keep by surfacing exactly this](#2026-06-01-active-reignorecase-silently-defeats-a-a-z-capital-letter-intent--scope-case-with---i--and-a-benchmark-earns-its-keep-by-surfacing-exactly-this) |
 | 2026-06-01 | [ACTIVE] | [A composite benchmark should compose validated measures, not invent metrics — and must carry its own "proxy, not proof" caveat](#2026-06-01-active-a-composite-benchmark-should-compose-validated-measures-not-invent-metrics--and-must-carry-its-own-proxy-not-proof-caveat) |
 | 2026-06-01 | [ACTIVE] | [Exclude the signal shared by construction before clustering — and let the live run, not fixtures, be the verdict](#2026-06-01-active-exclude-the-signal-shared-by-construction-before-clustering--and-let-the-live-run-not-fixtures-be-the-verdict) |
@@ -82,6 +83,32 @@ Each entry carries one status tag:
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] A "primary source" is domain-relative — adapt the angle to the topic, and match signals at word level
+
+- **Context (B29).** `suggest_queries` hard-coded `site:github.com` as its
+  primary-source angle. For a dev tool that's a fine default — but the EU AI Act
+  live run (policy/legal) returned 0 authoritative sources and GitHub was useless;
+  the real primary source was `eur-lex.europa.eu`/`.gov`. "Primary source" means
+  different domains for code vs. law vs. medicine.
+- **Rule.** **A capability that points at "the authoritative source" must adapt
+  to the topic's domain, not assume one field's defaults.** Detect the domain
+  (cheap keyword signal) and swap the target: policy/legal/gov → official
+  sites; default → code. The default stays the common case; the override serves
+  the domains a single hard-coded value silently failed.
+- **Match domain signals at WORD level, never substring.** `"act"` is a strong
+  policy signal — but `"React"`, `"transaction"`, `"character"` all *contain*
+  "act". Tokenize and test set-membership (`words & _POLICY_SIGNALS`), so "React
+  Server Components" stays dev. Substring matching on short signal words is a
+  silent mis-classifier.
+- **Low-harm override, curated list, expect growth.** Picking the wrong
+  primary-source angle just offers a less-useful suggestion (the agent ignores
+  it) — so a small, high-precision signal list is fine, and like every curated
+  list here it will grow with real usage (B25 discipline). Started with
+  policy/legal/gov; medical/science can follow when a live run needs them.
+- **Mechanism / tests:** `tools/suggest.py::_primary_source_template` /
+  `_reserved_templates` / `_POLICY_SIGNALS` + `tests/test_suggest.py::
+  TestB29DomainAdaptivePrimarySource`. Verified live (EU → official, React → github).
 
 ### [2026-06-01] [ACTIVE] `re.IGNORECASE` silently defeats a `[A-Z]` capital-letter intent — scope case with `(?-i:…)`; and a benchmark earns its keep by surfacing exactly this
 

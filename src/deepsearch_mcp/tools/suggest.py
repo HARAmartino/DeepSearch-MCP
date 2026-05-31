@@ -44,12 +44,31 @@ _AC_TIMEOUT = 5  # Fast endpoint; fail quickly and fall back to templates
 # husband / age" (Sam Altman run, 2026-05-30). B11: guarantee that ≥1 criticism
 # AND ≥1 primary-source angle always reach the agent, since that is the tool's
 # actual mission (breaking echo chambers), not surfacing popular queries.
-_RESERVED_TEMPLATES = [
+# The reserved set always includes a temporal, a criticism, an alternatives, and
+# a PRIMARY-SOURCE angle. The primary-source slot is domain-adaptive (B29) — see
+# `_primary_source_template`.
+_RESERVED_BASE = [
     "{topic} 2025 OR 2026",       # temporal freshness (most research is time-bound)
     "{topic} criticism",          # criticism angle (guaranteed)
     "{topic} alternatives",       # alternative viewpoints
-    "{topic} site:github.com",    # primary source (guaranteed)
 ]
+
+# B29: the primary-source angle was dev-only (`site:github`), so policy/legal/gov
+# research (e.g. "EU AI Act enforcement") got *no* path to its actual primary
+# source (eur-lex/europa.eu/.gov) — a live run returned 0 authoritative results
+# and no way to reach one. Pick the primary-source template from the topic's
+# domain. Default stays dev/code. (Word-level match, not substring: "React"
+# must NOT trip on "act". Curated signal list — expect it to grow with real
+# usage, like the other allowlists; see the [STALE]-list discipline.)
+_PRIMARY_SOURCE_DEV = "{topic} site:github.com"
+_PRIMARY_SOURCE_OFFICIAL = "{topic} site:.gov OR site:europa.eu OR site:.int"
+_POLICY_SIGNALS = frozenset(
+    "law laws act regulation regulations regulatory policy directive treaty bill "
+    "statute legislation legal court ruling sanctions tariff tax election gdpr "
+    "compliance government ministry parliament senate congress antitrust "
+    "constitution amendment".split()
+)
+
 # EXTRA templates fill any slots left after reserved + a capped share of
 # autocomplete + context entities. Dropped first when the cap is tight.
 _EXTRA_TEMPLATES = [
@@ -57,8 +76,9 @@ _EXTRA_TEMPLATES = [
     "{topic} vs",
     "{topic} site:arxiv.org OR site:research.google.com",
 ]
-# Full set, reserved first (kept for back-compat / _build_template_queries).
-_VIEWPOINT_TEMPLATES = _RESERVED_TEMPLATES + _EXTRA_TEMPLATES
+# Full (dev-default) set, reserved first — kept for back-compat /
+# `_build_template_queries`'s default argument.
+_VIEWPOINT_TEMPLATES = _RESERVED_BASE + [_PRIMARY_SOURCE_DEV] + _EXTRA_TEMPLATES
 
 # Autocomplete is enrichment, not the mission: cap its share so it cannot crowd
 # the reserved templates out of the 8-result window (B11).
@@ -114,7 +134,9 @@ async def suggest_queries(
     2. Temporal-freshness ("2025 OR 2026") — first template because most research is time-bound
     3. Criticism angle — **always present** (breaks echo chambers)
     4. Alternatives angle
-    5. Primary-source `site:github.com` — **always present**
+    5. Primary-source angle — **always present**, and **domain-adaptive** (B29):
+       policy/legal/gov topics get official sources (`site:.gov OR site:europa.eu
+       OR site:.int`); everything else gets `site:github.com` (dev/code default)
     6. Entity drill-downs from context, then overflow templates (`problems
        limitations`, `vs`, `site:arxiv.org`) and any leftover autocomplete
 
@@ -145,7 +167,7 @@ async def suggest_queries(
 
     # Run autocomplete and template generation concurrently
     ac_task = asyncio.create_task(_fetch_autocomplete(topic))
-    reserved_queries = _build_template_queries(topic, _RESERVED_TEMPLATES)
+    reserved_queries = _build_template_queries(topic, _reserved_templates(topic))
     extra_queries = _build_template_queries(topic, _EXTRA_TEMPLATES)
 
     ac_suggestions = await ac_task
@@ -255,13 +277,29 @@ def _render_topic(topic: str) -> str:
     return clean
 
 
+def _primary_source_template(topic: str) -> str:
+    """B29: pick a domain-appropriate primary-source angle. Policy/legal/gov
+    topics → official sites (.gov / europa.eu / .int); everything else → the
+    dev/code default (GitHub). Word-level match so "React" doesn't trip "act"."""
+    words = set(re.findall(r"[a-z]+", topic.lower()))
+    if words & _POLICY_SIGNALS:
+        return _PRIMARY_SOURCE_OFFICIAL
+    return _PRIMARY_SOURCE_DEV
+
+
+def _reserved_templates(topic: str) -> list[str]:
+    """Reserved viewpoint templates with the domain-adaptive primary source (B29)
+    appended as the guaranteed primary-source slot."""
+    return [*_RESERVED_BASE, _primary_source_template(topic)]
+
+
 def _build_template_queries(
     topic: str, templates: list[str] | None = None
 ) -> list[str]:
     """Build viewpoint-shifting queries from the topic string.
 
-    `templates` defaults to the full viewpoint set; callers pass
-    `_RESERVED_TEMPLATES` / `_EXTRA_TEMPLATES` to render each tier separately.
+    `templates` defaults to the full (dev) viewpoint set; callers pass
+    `_reserved_templates(topic)` / `_EXTRA_TEMPLATES` to render each tier.
     """
     rendered = _render_topic(topic)
     return [t.format(topic=rendered) for t in (templates or _VIEWPOINT_TEMPLATES)]
