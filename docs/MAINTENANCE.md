@@ -255,6 +255,29 @@ This is a *client-side* problem, not a server bug.
    the cache already handles legitimate repeats for free, and a
    stricter limit would harm well-behaved agents.
 
+### Alert: `read_article extraction length ... Rule 6` (extraction drift)
+
+Surfaced by the **inter-release** diff, not the single-snapshot analyzer:
+
+```bash
+# capture a snapshot per release (e.g. copy ./.cache/telemetry.db aside), then:
+python evals/telemetry_diff.py --before before/telemetry.db --after ./.cache/telemetry.db
+```
+
+A `⚠ Rule 6` line means `read_article`'s average successful-extraction token
+count moved ≥ 10 % between the two snapshots — usually **silent extractor
+drift**, not a real content change.
+
+1. Run `python evals/dogfood_regression.py`. If goldens drifted, the extractor
+   or cleaner changed — locate and review the diff.
+2. If goldens are clean, spot-check a handful of live extractions: is the body
+   gaining boilerplate (length ↑) or getting truncated (length ↓)?
+3. If a dependency moved (`trafilatura`, `readability-lxml`, `lxml`), pin or
+   revert it in `pyproject.toml` and add a dated `[ACTIVE]` entry to
+   `docs/LESSONS.md` describing the trap.
+4. The alert needs ≥ 5 successful extractions per snapshot; below that it stays
+   silent (a 1-sample average is noise, not drift).
+
 ---
 
 ## Responding to auditor findings (semantic probe)

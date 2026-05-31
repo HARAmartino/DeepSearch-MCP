@@ -36,6 +36,7 @@ Each entry carries one status tag:
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [Detect silent drift with a metric you already store + a sample-size guard so it can't cry wolf](#2026-06-01-active-detect-silent-drift-with-a-metric-you-already-store--a-sample-size-guard-so-it-cant-cry-wolf) |
 | 2026-06-01 | [ACTIVE] | [A single snapshot describes; a diff judges — build the before/after view for release questions](#2026-06-01-active-a-single-snapshot-describes-a-diff-judges--build-the-beforeafter-view-for-release-questions) |
 | 2026-06-01 | [ACTIVE] | [Match the signal's mechanism to its meaning — "skip" vs "corroborate" are opposite affordances](#2026-06-01-active-match-the-signals-mechanism-to-its-meaning--skip-vs-corroborate-are-opposite-affordances) |
 | 2026-06-01 | [ACTIVE] | [Derive a missing signal from the highest-precision source you have, not every source](#2026-06-01-active-derive-a-missing-signal-from-the-highest-precision-source-you-have-not-every-source) |
@@ -77,6 +78,28 @@ Each entry carries one status tag:
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] Detect silent drift with a metric you already store + a sample-size guard so it can't cry wolf
+
+- **Context (B6).** Extractor regressions can be *silent*: a `trafilatura` bump
+  starts including boilerplate or truncating body, and nothing errors. Telemetry
+  stores token counts (not bodies), so the aggregate `read_article` extraction
+  length is a free, already-collected proxy for "are we extracting the same
+  amount of text?". A ≥±10% release-over-release swing flags the drift.
+- **Rule.** **To catch silent behaviour drift, diff a cheap proxy you already
+  record against a baseline — but gate it on sample size.** The danger of any
+  "alert on % change" metric is the small-n false alarm: a 1–2 sample average
+  swings wildly. Require a minimum sample in *both* snapshots (here ≥5 successful
+  extractions) before the alert can fire; below that, stay silent rather than cry
+  wolf. (Same spirit as the analyzer's `MIN_ROWS_FOR_CONFIDENCE` cold-start guard
+  and the B13 `_OUTAGE_THRESHOLD` — an alert is only as trustworthy as its n.)
+- **Scope the proxy to the thing you mean.** "Extraction length" is specifically
+  `read_article` *successful* token counts — not all tools, not error rows (whose
+  tiny token counts would dilute the signal). Pick the exact population the metric
+  is supposed to describe.
+- **Mechanism / tests:** `evals/telemetry_diff.py::extraction_length_drift`
+  (`EXTRACTION_DRIFT_PCT`, `DRIFT_MIN_SAMPLES`) + `TestExtractionDriftRule6`;
+  Operations Rule 6 in `METHODOLOGY.md` §4 + `MAINTENANCE.md` playbook.
 
 ### [2026-06-01] [ACTIVE] A single snapshot describes; a diff judges — build the before/after view for release questions
 

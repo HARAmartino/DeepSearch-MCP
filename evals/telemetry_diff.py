@@ -33,6 +33,14 @@ SUCCESS_DROP_ALERT_PTS = 5.0
 # Below this many rows in either snapshot, the diff is labelled PROVISIONAL.
 MIN_ROWS_FOR_CONFIDENCE = 50
 
+# Operations Rule 6 (B6): a swing this large in read_article's average extraction
+# length between releases signals silent trafilatura/readability behaviour drift
+# (a dependency bump quietly extracting more boilerplate or less body). Needs a
+# minimum number of successful extractions in BOTH snapshots — a 1-sample average
+# swings wildly and would cry wolf.
+EXTRACTION_DRIFT_PCT = 10.0
+DRIFT_MIN_SAMPLES = 5
+
 
 def _connect(db_path: str) -> sqlite3.Connection:
     p = Path(db_path)
@@ -95,6 +103,29 @@ def _pct_change(before: float | None, after: float | None) -> float | None:
     return round(100.0 * (after - before) / before, 1)
 
 
+def extraction_length_drift(before: dict, after: dict) -> str | None:
+    """Operations Rule 6 (B6): flag ±EXTRACTION_DRIFT_PCT% drift in read_article's
+    average extraction length between two snapshots. Returns an alert string, or
+    None when stable / too few successful extractions to judge."""
+    rb = before["tools"].get("read_article", {})
+    ra = after["tools"].get("read_article", {})
+    tb, ta = rb.get("avg_tokens_success"), ra.get("avg_tokens_success")
+    if (tb is None or ta is None
+            or rb.get("successes", 0) < DRIFT_MIN_SAMPLES
+            or ra.get("successes", 0) < DRIFT_MIN_SAMPLES):
+        return None
+    pct = _pct_change(tb, ta)
+    if pct is None or abs(pct) < EXTRACTION_DRIFT_PCT:
+        return None
+    direction = "grew" if pct > 0 else "shrank"
+    return (
+        f"⚠ Rule 6: read_article extraction length {direction} {abs(pct):.1f}% "
+        f"({tb:.0f} → {ta:.0f} avg tokens, threshold ±{EXTRACTION_DRIFT_PCT:.0f}%) "
+        f"— suspect silent trafilatura/readability drift. Run dogfood_regression "
+        f"and spot-check a few extractions before trusting the release."
+    )
+
+
 def diff_snapshots(before: dict, after: dict) -> dict:
     """Pure diff of two `snapshot_metrics` dicts → deltas + regression notes."""
     notes: list[str] = []
@@ -142,6 +173,11 @@ def diff_snapshots(before: dict, after: dict) -> dict:
     gone_codes = sorted(set(eb) - set(ea))
     for c in new_codes:
         notes.append(f"⚠ new error code appeared: {c} ({ea[c]}×)")
+
+    # Operations Rule 6 — extraction-length drift (B6)
+    drift = extraction_length_drift(before, after)
+    if drift:
+        notes.append(drift)
 
     return {
         "provisional": provisional,

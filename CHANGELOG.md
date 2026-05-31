@@ -133,6 +133,16 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Added — Operations Rule 6: extraction-length drift alert (2026-06-01, B6)
+- `evals/telemetry_diff.py` now flags a `⚠ Rule 6` finding when `read_article`'s
+  average successful-extraction token count drifts ≥ ±10% between two snapshots
+  (with a ≥5-extraction-per-snapshot sample guard). This catches **silent
+  trafilatura/readability behaviour drift** — e.g. a dependency bump that quietly
+  extracts more boilerplate or truncates body — which single-snapshot telemetry
+  and even dogfooding can miss in the wild.
+- Codified as Operations Rule 6 (`docs/METHODOLOGY.md` §4) with a response
+  playbook in `docs/MAINTENANCE.md`. Tests: `TestExtractionDriftRule6`.
+
 ### Added — telemetry_diff.py: before/after release comparison (2026-06-01, B4)
 - `evals/telemetry_diff.py --before A.db --after B.db` diffs two telemetry
   snapshots and reports per-tool + overall deltas (success rate, tokens/call,

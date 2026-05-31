@@ -129,3 +129,44 @@ class TestDiffCli:
         assert td.main(["--before", str(b), "--after", str(a), "--json"]) == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload["rows"] == {"before": 5, "after": 5}
+
+
+class TestExtractionDriftRule6:
+    """B6 / Operations Rule 6: flag ±10% read_article extraction-length drift,
+    with a sample-size guard so a 1-extraction average can't cry wolf."""
+
+    def _m(self, rows, tmp_path, name):
+        return _metrics(tmp_path, rows, name)
+
+    def test_drift_above_threshold_is_flagged(self, tmp_path):
+        before = self._m([_row(status="success", tokens=1000)] * 6, tmp_path, "b.db")
+        after = self._m([_row(status="success", tokens=1200)] * 6, tmp_path, "a.db")  # +20%
+        alert = td.extraction_length_drift(before, after)
+        assert alert is not None and "Rule 6" in alert and "grew" in alert
+        # …and it surfaces in the diff notes
+        assert any("Rule 6" in n for n in td.diff_snapshots(before, after)["notes"])
+
+    def test_shrink_is_flagged_with_direction(self, tmp_path):
+        before = self._m([_row(status="success", tokens=2000)] * 6, tmp_path, "b.db")
+        after = self._m([_row(status="success", tokens=1500)] * 6, tmp_path, "a.db")  # -25%
+        alert = td.extraction_length_drift(before, after)
+        assert alert is not None and "shrank" in alert
+
+    def test_small_drift_not_flagged(self, tmp_path):
+        before = self._m([_row(status="success", tokens=1000)] * 6, tmp_path, "b.db")
+        after = self._m([_row(status="success", tokens=1050)] * 6, tmp_path, "a.db")  # +5%
+        assert td.extraction_length_drift(before, after) is None
+
+    def test_insufficient_samples_not_flagged(self, tmp_path):
+        # Big swing but only a few extractions → must NOT flag (sample guard).
+        before = self._m([_row(status="success", tokens=1000)] * 2, tmp_path, "b.db")
+        after = self._m([_row(status="success", tokens=3000)] * 2, tmp_path, "a.db")
+        assert td.extraction_length_drift(before, after) is None
+
+    def test_only_read_article_counts(self, tmp_path):
+        # search_web token swings are not "extraction length" → not Rule 6.
+        before = self._m([_row(tool="search_web", status="success", tokens=100)] * 6,
+                         tmp_path, "b.db")
+        after = self._m([_row(tool="search_web", status="success", tokens=500)] * 6,
+                        tmp_path, "a.db")
+        assert td.extraction_length_drift(before, after) is None

@@ -139,6 +139,19 @@ Each rule responds to one of the `🛠 SUGGESTED ACTIONS` lines printed by
   repeats. Add the failing pattern as a `Bad (…) → use Y instead` Few-Shot example
   in the offending tool's docstring so future agents are warned.
 
+### Rule 6 — `read_article` extraction length drifts ≥ ±10 % between releases → behaviour drift (B6)
+- **Trigger:** `evals/telemetry_diff.py --before A --after B` prints a `⚠ Rule 6`
+  line (avg success tokens moved ≥ `EXTRACTION_DRIFT_PCT`, with ≥ `DRIFT_MIN_SAMPLES`
+  successful extractions in each snapshot).
+- **Cause:** usually a silent `trafilatura` / `readability-lxml` behaviour change
+  (a dependency bump quietly extracting more boilerplate, or truncating body).
+  Telemetry stores token counts but not bodies, so this is the only *aggregate*
+  way to catch it — dogfooding sees it on the corpus, this sees it in the wild.
+- **Patch (in order):** (1) `python evals/dogfood_regression.py` — did goldens
+  drift? If yes, locate the extractor/cleaner change. (2) Spot-check a few real
+  extractions for new noise or truncation. (3) If a dependency moved, pin/revert
+  it in `pyproject.toml` and record the trap in `docs/LESSONS.md`.
+
 ---
 
 ## 5. Open Improvement Backlog
@@ -165,7 +178,7 @@ here** — the backlog's existence is what prevents "what do I do next?" paralys
 | ~~**B3**~~ | ~~Expand the adversarial fixture corpus from 5 to 10+ sites~~ | — | **✅ DONE 2026-05-31** disc:2026-05-29 — Gauntlet 5→**10** categories: added forum Q&A, academic preprint, government notice, corporate press release, e-commerce product (`tests/test_extractor.py`). Avg holds at **8.72 ≥ 8.5**; all 10 clear the 7.0 floor. Honest scoping: hand-written fixtures are a **regression net** across categories, not a discovery tool (that's `live_check`/dogfooding). |
 | ~~**B4**~~ | ~~Telemetry diff report between two `telemetry.db` snapshots~~ | — | **✅ DONE 2026-06-01** — `evals/telemetry_diff.py --before A --after B`: per-tool + overall deltas (success rate, tokens/call, latency) and error-code churn, with regression notes (success-rate drop, new error code) and a PROVISIONAL banner below the row-confidence floor. Answers "did this release help or hurt?" that a single snapshot can't. Unblocks B6. Pinned by `tests/test_telemetry_diff.py`. |
 | ~~**B5**~~ | ~~Add a "noise leak hint" check to `analyze_telemetry.py`~~ | — | **✅ DONE 2026-05-29 (relocated)** — see note below |
-| **B6** | Operations Rule 6 — flag ±10 % extraction length variance between releases | Catches silent trafilatura/readability behavior drift independently of dogfooding | B4 done first |
+| ~~**B6**~~ | ~~Operations Rule 6 — flag ±10 % extraction length variance between releases~~ | — | **✅ DONE 2026-06-01** — `telemetry_diff.extraction_length_drift()` flags `read_article` avg-success-token swings ≥ ±`EXTRACTION_DRIFT_PCT` (10%) with a ≥ `DRIFT_MIN_SAMPLES` guard; surfaced in the diff and codified as **Operations Rule 6** (§4) + a MAINTENANCE playbook. Built on B4. Pinned by `TestExtractionDriftRule6`. |
 | ~~**B7**~~ | ~~Auto-propose a candidate `_NOISE_LINE_RE` regex from each auditor finding~~ | — | **✅ DONE 2026-05-29 (reframed)** — see note below |
 | ~~**B8**~~ | ~~Intermittent `PytestUnhandledThreadExceptionWarning` in `test_telemetry.py` (fire-and-forget write races loop teardown)~~ | — | **✅ DONE 2026-05-31** disc:2026-05-29 — added an **autouse** fixture in `test_telemetry.py` that `await telemetry.drain()`s in teardown, so no fire-and-forget aiosqlite write outlives its test (regardless of whether the test body drains). Pinned by `TestDrainSafety` (deterministic: a slow write is provably pending, then drain clears it). Warning is nondeterministic → pin the invariant, not the symptom. |
 | ~~**B9**~~ | ~~Strip "Part of a series on" / infobox nav-template tables~~ | — | **✅ DONE 2026-05-30** — `strip_leading_wiki_chrome`: removes a *leading* table carrying a high-precision infobox/nav marker. Mid-article + unmarked + prose-first bodies untouched (no baseline drift). disc:2026-05-30 |
