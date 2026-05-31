@@ -133,6 +133,16 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Fixed — dogfood_audit byline heuristic no longer false-positives on prose (2026-06-01, B31)
+- The `METADATA_STUB` byline pattern (`by\s+[A-Z]`) was compiled with
+  `re.IGNORECASE`, so `[A-Z]` matched *any* letter — flagging ordinary prose
+  that starts with "by <word>" (e.g. "By declaring `__slots__`…") as author
+  metadata. Scoped that alternative to case-sensitive `(?-i:By\s+[A-Z])`: real
+  bylines ("By Jane Doe") still flag, prose does not.
+- Surfaced by the new DQS cleanliness sub-score (one gauntlet extraction was
+  spuriously flagged). **DQS 92.9 → 94.9** (cleanliness 90 → 100). Tests:
+  `tests/test_dogfood_audit.py::TestSoftTier::test_by_lowercase_prose_not_flagged`.
+
 ### Added — DeepSearch Quality Score (DQS) benchmark (2026-06-01, B30)
 - `evals/benchmark.py` produces a single composite **0–100 quality score** for
   the whole server, like an LLM benchmark: a fixed, offline, deterministic

@@ -104,7 +104,12 @@ _SOFT_HEURISTICS: list[tuple[str, re.Pattern]] = [
         # anchor already scopes these to line starts.
         "METADATA_STUB",
         re.compile(
-            r"^\s*(by\s+[A-Z]|tags?\s*[:|]|posted\s+(in|on|by)|filed\s+under|"
+            # The byline alternative is case-SENSITIVE via (?-i:…): a real byline
+            # is "By <Capitalized Name>". Under the surrounding IGNORECASE, the
+            # `[A-Z]` would otherwise match any letter, so "By declaring
+            # `__slots__`" (and any "by <word>" prose) tripped it — a false
+            # positive surfaced by the DQS cleanliness sub-score (2026-06-01).
+            r"^\s*((?-i:By\s+[A-Z])|tags?\s*[:|]|posted\s+(in|on|by)|filed\s+under|"
             r"categor(y|ies)\s*[:|]|published\s+(in|on|by)|updated\s*[:|]|"
             r"photo\s+by|image(\s+credit)?\s*[:|]|credit\s*[:|]|source\s*[:|]|"
             r"originally\s+published)",

@@ -36,6 +36,7 @@ Each entry carries one status tag:
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [`re.IGNORECASE` silently defeats a `[A-Z]` capital-letter intent — scope case with `(?-i:…)`; and a benchmark earns its keep by surfacing exactly this](#2026-06-01-active-reignorecase-silently-defeats-a-a-z-capital-letter-intent--scope-case-with---i--and-a-benchmark-earns-its-keep-by-surfacing-exactly-this) |
 | 2026-06-01 | [ACTIVE] | [A composite benchmark should compose validated measures, not invent metrics — and must carry its own "proxy, not proof" caveat](#2026-06-01-active-a-composite-benchmark-should-compose-validated-measures-not-invent-metrics--and-must-carry-its-own-proxy-not-proof-caveat) |
 | 2026-06-01 | [ACTIVE] | [Exclude the signal shared by construction before clustering — and let the live run, not fixtures, be the verdict](#2026-06-01-active-exclude-the-signal-shared-by-construction-before-clustering--and-let-the-live-run-not-fixtures-be-the-verdict) |
 | 2026-06-01 | [ACTIVE] | [An orientation tool must show only ACTIONABLE state — and its edge cases hide until the happy path is exhausted](#2026-06-01-active-an-orientation-tool-must-show-only-actionable-state--and-its-edge-cases-hide-until-the-happy-path-is-exhausted) |
@@ -81,6 +82,29 @@ Each entry carries one status tag:
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] `re.IGNORECASE` silently defeats a `[A-Z]` capital-letter intent — scope case with `(?-i:…)`; and a benchmark earns its keep by surfacing exactly this
+
+- **Context (B31).** The noise auditor's byline heuristic `by\s+[A-Z]` was meant
+  to catch "By <Capitalized Name>". But the pattern was compiled with
+  `re.IGNORECASE`, which makes `[A-Z]` match *any* letter — so any prose starting
+  "by <word>" ("By declaring `__slots__`…") was flagged as author metadata.
+- **Rule.** **A character class that encodes a *case* intent (`[A-Z]` = "must be
+  capital") is silently nullified by a pattern-wide `IGNORECASE` flag.** When one
+  alternative in a flagged pattern is case-sensitive on purpose, scope it with an
+  inline `(?-i:…)` rather than dropping the flag (the other alternatives —
+  "tags:", "posted in" — still want IGNORECASE). Beware mixing case-bearing and
+  case-insensitive logic under one global flag.
+- **The benchmark paid for itself immediately.** This false positive had sat in
+  the auditor unnoticed; the *first* run of the new DQS (B30) cleanliness
+  sub-score flagged exactly one gauntlet extraction and led straight to it. A
+  composite quality number isn't just for tracking — its sub-scores are a cheap
+  *magnifying glass* that turns "something's slightly off" into a specific line.
+  Fixing it nudged DQS 92.9→94.9, the intended virtuous loop (measure → see the
+  gap → close it).
+- **Mechanism / tests:** `evals/dogfood_audit.py` (METADATA_STUB `(?-i:By\s+[A-Z])`)
+  + `tests/test_dogfood_audit.py::TestSoftTier` (`test_by_lowercase_prose_not_flagged`
+  + the preserved `test_metadata_by_author_flagged`).
 
 ### [2026-06-01] [ACTIVE] A composite benchmark should compose validated measures, not invent metrics — and must carry its own "proxy, not proof" caveat
 

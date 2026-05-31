@@ -73,6 +73,13 @@ class TestSoftTier:
     def test_metadata_by_author_flagged(self):
         assert _categories("By Jane Doe") == ["METADATA_STUB"]
 
+    def test_by_lowercase_prose_not_flagged(self):
+        # Surfaced by the DQS cleanliness sub-score: IGNORECASE made `[A-Z]`
+        # match any letter, so prose starting "By <lowercase>" tripped the
+        # byline heuristic. A real byline needs a Capitalized name.
+        assert _categories("By declaring `__slots__`") == []
+        assert _categories("By using a generator you save memory") == []
+
     def test_metadata_tags_flagged(self):
         assert _categories("Tags: AI, agents, MCP") == ["METADATA_STUB"]
 
