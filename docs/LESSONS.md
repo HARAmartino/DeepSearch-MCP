@@ -36,6 +36,7 @@ Each entry carries one status tag:
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-05-31 | [ACTIVE] | [An error hint must scale with evidence — a recovery action futile at scale shouldn't be the advice](#2026-05-31-active-an-error-hint-must-scale-with-evidence--a-recovery-action-futile-at-scale-shouldnt-be-the-advice) |
 | 2026-05-31 | [ACTIVE] | [Enrichment must not crowd out the differentiator — cap the optional input, reserve slots for the mission](#2026-05-31-active-enrichment-must-not-crowd-out-the-differentiator--cap-the-optional-input-reserve-slots-for-the-mission) |
 | 2026-05-31 | [ACTIVE] | [Fire-and-forget work needs a drain barrier in tests — put it in the gating (autouse) fixture](#2026-05-31-active-fire-and-forget-work-needs-a-drain-barrier-in-tests--put-it-in-the-gating-autouse-fixture) |
 | 2026-05-31 | [ACTIVE] | [Hand-written fixtures are a regression net, not a discovery tool — expand them for breadth](#2026-05-31-active-hand-written-fixtures-are-a-regression-net-not-a-discovery-tool--expand-them-for-breadth) |
@@ -73,6 +74,31 @@ Each entry carries one status tag:
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-05-31] [ACTIVE] An error hint must scale with evidence — a recovery action futile at scale shouldn't be the advice
+
+- **Context (B13).** `search_web`'s `CONN_ERROR`/`TIMEOUT` hints told the agent to
+  "retry / broaden / check spelling / reword". For *one* flaky failure that's
+  fine, but during a backend **outage** every one of those is futile — the agent
+  burns turns rewording a query that was never the problem.
+- **Rule.** **A structured error hint is a recovery instruction; make it scale
+  with the evidence.** The same error code can warrant opposite advice depending
+  on whether it's a one-off or systemic. Two-part fix: (1) even the base hint
+  *hedges* ("if searches keep failing it's the backend, not your query"); (2) the
+  tool keeps a cheap **consecutive-failure counter** and, past a threshold,
+  escalates to "stop rewording — switch strategy" and flips `retryable→False` to
+  break the retry loop. A single success resets the streak.
+- **Put the systemic signal where the action is.** The telemetry skew guard
+  already knows "a 100%-failing tool is systemic" — but that's offline analysis.
+  The agent acts on the *hint*, in the moment, so the per-session call site needs
+  its own lightweight streak counter. Don't make the consumer infer systemic-ness
+  it can't see; encode it in the response it actually reads.
+- **Shared mutable state ⇒ reset fixture.** The counter is module-global, so
+  chaos tests that trip it would bleed streaks into each other. A module-level
+  autouse reset fixture isolates them (same pattern as the B8 telemetry drain).
+- **Mechanism / tests:** `tools/search.py` (`_consecutive_failures`,
+  `_note_search_outcome`, `_OUTAGE_THRESHOLD`, `_map_ddgs_exception(..., consecutive_failures)`)
+  + `tests/test_search.py::TestB13OutageEscalation` (+ autouse `_reset_search_failure_streak`).
 
 ### [2026-05-31] [ACTIVE] Enrichment must not crowd out the differentiator — cap the optional input, reserve slots for the mission
 

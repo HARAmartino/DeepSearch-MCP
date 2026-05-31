@@ -38,11 +38,14 @@ from src.deepsearch_mcp.core.cache import (
     make_search_key,
 )
 from src.deepsearch_mcp.tools.search import (
+    _OUTAGE_THRESHOLD,
     _ddg_html_fallback,
     _decode_ddg_href,
     _jaccard,
     _map_ddgs_exception,
     _mark_near_duplicates,
+    _note_search_outcome,
+    _reset_failure_streak,
     _title_tokens,
     search_web,
 )
@@ -71,6 +74,16 @@ _FAKE_RESULTS = [
 async def _clear_cache(query: str, region: str | None = None) -> None:
     key = make_search_key(query, region, "moderate", None)
     await cache_delete(key)
+
+
+@pytest.fixture(autouse=True)
+def _reset_search_failure_streak():
+    """B13: the consecutive-failure counter is module-global shared state. Reset
+    it around every test so a failing-search test can't bleed its streak into
+    the next test's assertions (cf. the B8 telemetry-drain lesson)."""
+    _reset_failure_streak()
+    yield
+    _reset_failure_streak()
 
 
 # ---------------------------------------------------------------------------
@@ -796,3 +809,103 @@ class TestSearchWebContextAwareHints:
         )
         hint_lower = data["hint"].lower()
         assert "keyword" in hint_lower or "search" in hint_lower
+
+
+class TestB13OutageEscalation:
+    """B13: the search hint must escalate from 'retry/reword' to 'switch
+    strategy' once searches keep failing — so the agent stops burning turns
+    rewording a query during a backend outage."""
+
+    def _hint(self, result: str) -> str:
+        return json.loads(result)["hint"].lower()
+
+    # --- unit: _map_ddgs_exception with a failure streak ---
+
+    # The systemic banner uniquely says "in a row"; the base hints only *hedge*
+    # toward switching strategy ("if searches keep failing…"), so that phrase
+    # alone can't distinguish them — key on "in a row".
+    def test_single_failure_keeps_retry_advice(self):
+        # One-off failure (streak 1) → NOT systemic: base hint, still retryable.
+        result = _map_ddgs_exception(ConnectionError("DNS resolution failed"),
+                                     consecutive_failures=1)
+        data = json.loads(result)
+        assert data["retryable"] is True
+        assert "retry once" in self._hint(result)
+        assert "in a row" not in self._hint(result)
+
+    def test_systemic_failure_says_switch_strategy(self):
+        # Streak at threshold → systemic: stop rewording, switch strategy,
+        # and not retryable (breaks the reword-and-retry loop).
+        from duckduckgo_search.exceptions import DuckDuckGoSearchException
+        result = _map_ddgs_exception(DuckDuckGoSearchException("backend boom"),
+                                     consecutive_failures=_OUTAGE_THRESHOLD)
+        hint = self._hint(result)
+        assert "switch strategy" in hint
+        assert "stop rewording" in hint
+        assert json.loads(result)["retryable"] is False
+        assert str(_OUTAGE_THRESHOLD) in json.loads(result)["hint"]
+
+    def test_systemic_timeout_flips_to_not_retryable(self):
+        # A lone timeout is retryable=True; a systemic run flips it to False.
+        from duckduckgo_search.exceptions import TimeoutException
+        lone = _map_ddgs_exception(TimeoutException("t"), consecutive_failures=1)
+        many = _map_ddgs_exception(TimeoutException("t"),
+                                   consecutive_failures=_OUTAGE_THRESHOLD)
+        assert json.loads(lone)["retryable"] is True
+        assert json.loads(many)["retryable"] is False
+        assert "switch strategy" in self._hint(many)
+
+    def test_default_count_is_not_systemic(self):
+        # Existing callers pass no count → must keep pre-B13 base behaviour.
+        from duckduckgo_search.exceptions import DuckDuckGoSearchException
+        result = _map_ddgs_exception(DuckDuckGoSearchException("x"))
+        assert "in a row" not in self._hint(result)
+
+    # --- unit: the streak counter ---
+
+    def test_counter_increments_then_resets(self):
+        _reset_failure_streak()
+        assert _note_search_outcome(failed=True) == 1
+        assert _note_search_outcome(failed=True) == 2
+        assert _note_search_outcome(failed=False) == 0   # success clears it
+        assert _note_search_outcome(failed=True) == 1
+
+    # --- integration: repeated failed search_web calls escalate ---
+
+    @pytest.fixture(autouse=True)
+    def _no_fallback(self):
+        with patch(
+            "src.deepsearch_mcp.tools.search._ddg_html_fallback",
+            new_callable=AsyncMock,
+        ) as m:
+            m.return_value = []
+            yield
+
+    @patch("asyncio.to_thread", new_callable=AsyncMock)
+    async def test_repeated_failures_escalate_to_systemic(self, mock_thread):
+        from duckduckgo_search.exceptions import DuckDuckGoSearchException
+        mock_thread.side_effect = DuckDuckGoSearchException("backend down")
+        # Error responses are not cached, so the same query keeps hitting the
+        # failure path. First call is a one-off; by the threshold it's systemic.
+        first = await search_web(query="b13 outage probe")
+        assert "in a row" not in self._hint(first)
+        last = first
+        for _ in range(_OUTAGE_THRESHOLD - 1):
+            last = await search_web(query="b13 outage probe")
+        assert "in a row" in self._hint(last)
+        assert json.loads(last)["retryable"] is False
+
+    @patch("asyncio.to_thread", new_callable=AsyncMock)
+    async def test_success_between_failures_resets_streak(self, mock_thread):
+        from duckduckgo_search.exceptions import DuckDuckGoSearchException
+        # Fail up to (threshold-1), then succeed (resets), then fail once more:
+        # that last failure must be treated as a one-off, not systemic.
+        mock_thread.side_effect = DuckDuckGoSearchException("down")
+        for _ in range(_OUTAGE_THRESHOLD - 1):
+            await search_web(query="b13 reset probe")
+        mock_thread.side_effect = None
+        mock_thread.return_value = list(_FAKE_RESULTS)
+        await search_web(query="b13 reset probe success")  # success → reset
+        mock_thread.side_effect = DuckDuckGoSearchException("down again")
+        after = await search_web(query="b13 reset probe")
+        assert "in a row" not in self._hint(after)

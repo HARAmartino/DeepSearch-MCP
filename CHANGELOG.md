@@ -133,6 +133,18 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Changed — search_web hints escalate on a backend outage (2026-05-31, B13)
+- `search_web` error hints no longer push "retry / broaden / check spelling" as
+  if rewording could fix a backend outage. Base `CONN_ERROR` / `TIMEOUT` hints
+  now hedge ("if searches keep failing it's the backend, not your query — switch
+  strategy"), and the tool tracks consecutive live-search failures: once 3 in a
+  row fail, the hint escalates to *"N searches in a row have failed — the backend
+  is unavailable, stop rewording, switch strategy"* and `retryable` flips to
+  `false` to break reword-and-retry loops. A single success resets the streak.
+- Existing single-failure behavior (retryable timeouts/DNS errors) is unchanged;
+  the escalation only triggers on a sustained run of failures.
+- Tests: `tests/test_search.py::TestB13OutageEscalation`.
+
 ### Added — Cross-agent instruction pointers (2026-05-31)
 - `AGENTS.md` (Codex / Cursor / Gemini / the cross-tool standard) and
   `.github/copilot-instructions.md` (GitHub Copilot) now point every AI agent at

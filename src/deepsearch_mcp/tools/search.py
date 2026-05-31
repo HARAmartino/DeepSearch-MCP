@@ -37,6 +37,33 @@ mcp = FastMCP("deepsearch-search-web")
 _JITTER_MIN = 0.5
 _JITTER_MAX = 1.5
 
+# B13: one failed search may be transient; many in a row means the backend is
+# DOWN, and rewording/broadening the query is futile (the agent just burns
+# turns). Track consecutive failed live searches so the error hint can escalate
+# from "retry once" to "stop rewording — switch strategy". This mirrors the
+# telemetry skew guard ("a 100%-failing tool is systemic, not per-query") but at
+# the per-session call site, since the agent acts on the hint immediately.
+_OUTAGE_THRESHOLD = 3
+_consecutive_failures = 0
+
+
+def _note_search_outcome(failed: bool) -> int:
+    """Update and return the consecutive live-search failure streak.
+
+    A success (results returned, even an empty list — the backend was reachable)
+    resets the streak; a failure increments it. Cache hits don't touch it (they
+    prove nothing about backend health).
+    """
+    global _consecutive_failures
+    _consecutive_failures = _consecutive_failures + 1 if failed else 0
+    return _consecutive_failures
+
+
+def _reset_failure_streak() -> None:
+    """Reset the failure streak (test helper; never needed in production)."""
+    global _consecutive_failures
+    _consecutive_failures = 0
+
 # Extra headers layered on top of primp's built-in browser fingerprint
 _DDGS_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9,ja;q=0.8",
@@ -172,7 +199,14 @@ async def search_web(
             query, region_param, safesearch, timelimit, max_results
         )
         if not results:
-            return _map_ddgs_exception(exc)
+            # B13: record the failure and let the hint escalate if searches
+            # keep failing (systemic outage vs a one-off).
+            streak = _note_search_outcome(failed=True)
+            return _map_ddgs_exception(exc, consecutive_failures=streak)
+
+    # Reached only on a reachable backend (results, possibly empty) → not an
+    # outage; clear the failure streak (B13).
+    _note_search_outcome(failed=False)
 
     # Flag near-duplicate titles (B16) — applies to both DDGS and fallback paths.
     results = _mark_near_duplicates(results)
@@ -370,7 +404,7 @@ def _ddgs_search_sync(
             raise exc
 
 
-def _map_ddgs_exception(exc: Exception) -> str:
+def _map_ddgs_exception(exc: Exception, consecutive_failures: int = 0) -> str:
     """Map DDGS exceptions to StructuredError JSON strings.
 
     Persona A FRICTION-B1/B2/B3 fix:
@@ -379,6 +413,12 @@ def _map_ddgs_exception(exc: Exception) -> str:
         passed a query, not a URL).
       - Transient connection errors (DNS / reset) are marked retryable=True
         so the agent doesn't give up on flaky networks.
+
+    B13: `consecutive_failures` is this session's run of back-to-back failed
+    searches. Once it crosses `_OUTAGE_THRESHOLD`, the backend is almost
+    certainly down — so the hint stops suggesting query tweaks (futile during an
+    outage) and tells the agent to switch strategy, and `retryable` flips to
+    False to break reword-and-retry loops.
     """
     try:
         from duckduckgo_search.exceptions import (
@@ -392,12 +432,20 @@ def _map_ddgs_exception(exc: Exception) -> str:
         TimeoutException = type(None)
 
     exc_str = str(exc)
+    systemic = consecutive_failures >= _OUTAGE_THRESHOLD
+    switch_strategy_hint = (
+        f"{consecutive_failures} searches in a row have now failed — the search "
+        "backend is unavailable (outage or sustained rate-limiting), NOT your "
+        "query. Stop rewording: rephrasing won't help. Switch strategy — use "
+        "results/sources you already have, call read_article on known URLs, or "
+        "pause and retry in a few minutes."
+    )
 
     if isinstance(exc, RatelimitException):
         return err.structured_error(
             err.RATE_LIMITED,
             f"DuckDuckGo rate limit exceeded: {exc_str}",
-            hint_override=(
+            hint_override=switch_strategy_hint if systemic else (
                 "DuckDuckGo rate-limited this session. Wait 60s, "
                 "or narrow the query with timelimit/region to reduce volume."
             ),
@@ -406,11 +454,11 @@ def _map_ddgs_exception(exc: Exception) -> str:
         return err.structured_error(
             err.TIMEOUT,
             f"DuckDuckGo search timed out: {exc_str}",
-            hint_override=(
-                "Search backend timed out. Retry once; "
-                "if it persists, broaden the query terms."
+            hint_override=switch_strategy_hint if systemic else (
+                "Search backend timed out. Retry once; if searches keep failing "
+                "it's the backend, not your query — switch strategy, don't reword."
             ),
-            retryable_override=True,
+            retryable_override=not systemic,
         )
 
     # Generic DDGS error or unexpected: detect transient sub-causes
@@ -420,15 +468,25 @@ def _map_ddgs_exception(exc: Exception) -> str:
     else:
         msg = f"Unexpected error during search: {exc_str}"
 
+    if systemic:
+        hint = switch_strategy_hint
+    elif transient:
+        hint = (
+            "Search backend unreachable (likely transient network/DNS). Retry "
+            "once; if searches keep failing it's the backend, not your query — "
+            "stop rewording and switch strategy."
+        )
+    else:
+        hint = (
+            "Search backend error. A one-off may be query-specific (try "
+            "suggest_queries for alternative phrasings); but if every search is "
+            "failing it's the backend, not your query — switch strategy instead "
+            "of rewording."
+        )
+
     return err.structured_error(
         err.CONN_ERROR,
         msg,
-        hint_override=(
-            "Search backend unreachable (likely transient network/DNS). "
-            "Retry once; if it persists, check query spelling or try broader terms."
-            if transient
-            else "Search backend error. Check query spelling, try broader terms, "
-                 "or call suggest_queries to generate alternative phrasings."
-        ),
-        retryable_override=transient,
+        hint_override=hint,
+        retryable_override=False if systemic else transient,
     )
