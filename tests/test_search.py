@@ -909,3 +909,46 @@ class TestB13OutageEscalation:
         mock_thread.side_effect = DuckDuckGoSearchException("down again")
         after = await search_web(query="b13 reset probe")
         assert "in a row" not in self._hint(after)
+
+
+class TestB14FreshnessSignal:
+    """B14: published_date is derived best-effort from the URL path (DDGS never
+    returns a date), giving a freshness signal on time-sensitive searches. The
+    snippet body is deliberately NOT mined (too unreliable for a recency filter)."""
+
+    @pytest.fixture(autouse=True)
+    async def _clear(self):
+        for q in ("b14 dated", "b14 undated", "b14 body"):
+            await _clear_cache(q)
+        yield
+        for q in ("b14 dated", "b14 undated", "b14 body"):
+            await _clear_cache(q)
+
+    @patch("asyncio.to_thread", new_callable=AsyncMock)
+    async def test_dated_url_yields_published_date(self, mock_thread):
+        mock_thread.return_value = [
+            {"title": "Headline", "body": "x",
+             "href": "https://news.example.com/2026/05/28/headline"},
+        ]
+        data = json.loads(await search_web(query="b14 dated"))
+        assert data[0]["published_date"] == "2026-05-28"
+
+    @patch("asyncio.to_thread", new_callable=AsyncMock)
+    async def test_undated_url_yields_null(self, mock_thread):
+        mock_thread.return_value = [
+            {"title": "Guide", "body": "x",
+             "href": "https://example.com/guide/asyncio"},
+        ]
+        data = json.loads(await search_web(query="b14 undated"))
+        assert data[0]["published_date"] is None
+
+    @patch("asyncio.to_thread", new_callable=AsyncMock)
+    async def test_snippet_body_date_is_not_mined(self, mock_thread):
+        # A date in the short snippet must NOT leak into published_date — only
+        # the URL is trusted. (Undated URL + dated body → still null.)
+        mock_thread.return_value = [
+            {"title": "Old ref", "body": "Originally published May 28, 2019.",
+             "href": "https://example.com/evergreen-page"},
+        ]
+        data = json.loads(await search_web(query="b14 body"))
+        assert data[0]["published_date"] is None

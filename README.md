@@ -147,7 +147,12 @@ Parameters:
 Returns: JSON array of {title, url, body, published_date, score}
 ```
 
-**Best practice:** Use `timelimit="y"` when researching current events to filter stale content.
+`published_date` is a best-effort freshness signal **derived from the result URL**
+(news URLs embed the date, e.g. `/2026/05/28/`); it is `null` when the URL carries
+no date (most non-news pages) — `null` does not mean "old". Treat it as approximate.
+
+**Best practice:** Use `timelimit="y"` when researching current events to filter
+stale content; use `published_date` to spot/sort recent items within the results.
 
 ### `read_article` — Clean Markdown extraction
 

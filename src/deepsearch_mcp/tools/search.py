@@ -5,7 +5,10 @@ Implementation notes:
   All calls are wrapped in asyncio.to_thread() to avoid blocking the event loop.
 - DDGS v8 result dicts use key 'href' (not 'url') for the page URL.
 - DDGS v8 does not return publication dates in any backend (html/lite/bing).
-  The published_date field will be None for all results.
+  As a freshness signal (B14), published_date is derived best-effort from the
+  result URL path (news URLs embed the pub date, e.g. /2026/05/28/); it stays
+  None when the URL carries no date. The snippet body is intentionally not
+  mined — a ~30-word excerpt's first date is too unreliable for a recency filter.
 - DDGS already applies TLS fingerprinting via primp (impersonate='random').
   Additional stealth headers are passed via DDGS(headers={...}) constructor.
 - A fresh DDGS instance is created per request (thread-safe, no shared state).
@@ -30,7 +33,7 @@ from ..core.http import fetch
 from ..core.models import SearchResult
 from ..core.source_quality import classify_source
 from ..core.telemetry import track
-from ..utils.date_parser import to_iso8601
+from ..utils.date_parser import best_effort_date
 
 mcp = FastMCP("deepsearch-search-web")
 
@@ -121,7 +124,12 @@ async def search_web(
     - `title`: Page title
     - `url`: Full URL of the result
     - `body`: Search snippet/summary (150–300 chars)
-    - `published_date`: ISO 8601 date if available, otherwise null
+    - `published_date`: ISO 8601 date (YYYY-MM-DD) **derived from the URL** when
+      it embeds one (e.g. news `/2026/05/28/` paths), else null. Best-effort
+      freshness signal — use it to spot/sort recent results on time-sensitive
+      topics; treat as approximate, and prefer `timelimit="d"/"w"/"m"/"y"` to
+      filter recency at the source. Null does NOT mean old (most non-news URLs
+      carry no date).
     - `source_tier`: 'authoritative' (curated trusted domain, .gov, .edu) or
       'unknown'. **Read 'authoritative' results first.** If a result set is all
       'unknown' (common for SEO-heavy topics), corroborate facts across several
@@ -141,7 +149,8 @@ async def search_web(
 
     Good:
       query="Python asyncio tutorial 2026", timelimit="y"
-      → [{"title":"...","url":"https://...","body":"...","published_date":null}]
+      → [{"title":"...","url":"https://site/2026/05/28/post","body":"...",
+          "published_date":"2026-05-28"}]   # date lifted from the URL path
 
     Good (targeted, low token cost):
       query="site:github.com trafilatura", max_results=5
@@ -187,7 +196,14 @@ async def search_web(
                 title=r.get("title", ""),
                 url=r.get("href", ""),
                 body=r.get("body", ""),
-                published_date=to_iso8601(r.get("published")),
+                # B14: DDGS never returns a date, so derive a best-effort
+                # freshness signal from the URL path (news URLs embed the
+                # pub date, e.g. /2026/05/28/). Snippet body is NOT used — a
+                # ~30-word excerpt's first date is too unreliable for a recency
+                # filter. Stays null when the URL carries no date.
+                published_date=best_effort_date(
+                    raw=r.get("published"), url=r.get("href", "")
+                ),
                 source_tier=classify_source(r.get("href", "")),
             ).model_dump()
             for r in (raw_results or [])
@@ -266,7 +282,7 @@ async def _ddg_html_fallback(
                     title=a.get_text(strip=True),
                     url=real_url,
                     body=snippet_el.get_text(strip=True) if snippet_el else "",
-                    published_date=None,
+                    published_date=best_effort_date(url=real_url),  # B14: URL date
                     source_tier=classify_source(real_url),
                 ).model_dump()
             )

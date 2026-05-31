@@ -133,6 +133,17 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Added — search_web freshness signal via URL-derived published_date (2026-06-01, B14)
+- `search_web` results now carry a best-effort `published_date` **derived from
+  the result URL path** (news URLs embed `/YYYY/MM/DD/`), instead of always
+  `null`. Applies to both the DDGS and HTML-fallback paths and reuses the
+  existing `date_parser.best_effort_date`. Gives agents a recency signal on
+  time-sensitive research (schedules, breaking news).
+- **Precision:** the snippet body is intentionally NOT mined — a ~30-word
+  excerpt's first date is too unreliable for a recency filter, so `published_date`
+  stays `null` unless the URL itself carries a date. `null` ≠ "old".
+- Tests: `tests/test_search.py::TestB14FreshnessSignal`.
+
 ### Changed — search_web hints escalate on a backend outage (2026-05-31, B13)
 - `search_web` error hints no longer push "retry / broaden / check spelling" as
   if rewording could fix a backend outage. Base `CONN_ERROR` / `TIMEOUT` hints

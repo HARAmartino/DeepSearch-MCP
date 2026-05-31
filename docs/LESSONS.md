@@ -36,6 +36,7 @@ Each entry carries one status tag:
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [Derive a missing signal from the highest-precision source you have, not every source](#2026-06-01-active-derive-a-missing-signal-from-the-highest-precision-source-you-have-not-every-source) |
 | 2026-05-31 | [ACTIVE] | [An error hint must scale with evidence — a recovery action futile at scale shouldn't be the advice](#2026-05-31-active-an-error-hint-must-scale-with-evidence--a-recovery-action-futile-at-scale-shouldnt-be-the-advice) |
 | 2026-05-31 | [ACTIVE] | [Enrichment must not crowd out the differentiator — cap the optional input, reserve slots for the mission](#2026-05-31-active-enrichment-must-not-crowd-out-the-differentiator--cap-the-optional-input-reserve-slots-for-the-mission) |
 | 2026-05-31 | [ACTIVE] | [Fire-and-forget work needs a drain barrier in tests — put it in the gating (autouse) fixture](#2026-05-31-active-fire-and-forget-work-needs-a-drain-barrier-in-tests--put-it-in-the-gating-autouse-fixture) |
@@ -74,6 +75,29 @@ Each entry carries one status tag:
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] Derive a missing signal from the highest-precision source you have, not every source
+
+- **Context (B14).** DDGS never returns `published_date`, so time-sensitive
+  research had no recency signal. Two derivation sources were available per
+  result: the **URL path** (news embeds `/YYYY/MM/DD/` — high precision) and the
+  **snippet body** (a ~30-word excerpt — low precision: its first date might be
+  a citation, an event, "back in 2019", anything).
+- **Rule.** When backfilling a missing field, **use the highest-precision source
+  and stop — don't add lower-precision sources for "more coverage".** A wrong
+  value here is worse than a null: a bogus `published_date` makes a recency
+  *filter* discard good results or trust stale ones. So search derives from the
+  URL only and leaves `published_date` null otherwise; `null` explicitly does
+  not mean "old". (Contrast `read_article`, which *does* mine the body — there
+  the body is the full article, and the date usually leads it: precision is
+  high, so the extra source is justified. Same helper, different inputs.)
+- **Reuse the tested helper, vary the inputs.** `best_effort_date(raw, url,
+  body)` already existed; search passes only `raw, url`, read_article passes all
+  three. No new parsing code, and the precision decision is just which arguments
+  you feed it.
+- **Mechanism / tests:** `tools/search.py` (`best_effort_date(raw=published,
+  url=href)` on DDGS + fallback paths) + `tests/test_search.py::TestB14FreshnessSignal`
+  (dated URL → date; undated URL → null; **dated snippet body → still null**).
 
 ### [2026-05-31] [ACTIVE] An error hint must scale with evidence — a recovery action futile at scale shouldn't be the advice
 
