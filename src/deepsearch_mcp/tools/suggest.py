@@ -80,6 +80,29 @@ _EXTRA_TEMPLATES = [
 # `_build_template_queries`'s default argument.
 _VIEWPOINT_TEMPLATES = _RESERVED_BASE + [_PRIMARY_SOURCE_DEV] + _EXTRA_TEMPLATES
 
+# B32: the viewpoint WORDS above are English — appending "criticism"/"alternatives"
+# to a Japanese query won't surface Japanese content (a live "日本 新興 ガジェット
+# メーカー" run produced "… criticism / alternatives / vs", a silent no-op). Detect
+# a CJK (Japanese) topic and localize the word-based angles. The site:/temporal/
+# year angles are language-agnostic and stay as-is. Japanese-first (the observed
+# need); the table extends to more languages with real usage — B25 discipline.
+_CJK_RE = re.compile(r"[぀-ヿ㐀-鿿]")  # kana + CJK ideographs
+_RESERVED_BASE_JA = [
+    "{topic} 2025 OR 2026",       # temporal (language-agnostic)
+    "{topic} 批判",                # criticism
+    "{topic} 代替案",              # alternatives
+]
+_EXTRA_TEMPLATES_JA = [
+    "{topic} 問題点 デメリット",    # problems / limitations
+    "{topic} 比較",                # vs / comparison
+    "{topic} site:arxiv.org OR site:research.google.com",  # primary (lang-agnostic)
+]
+
+
+def _topic_lang(topic: str) -> str:
+    """'ja' if the topic contains CJK (Japanese) characters, else 'en' (B32)."""
+    return "ja" if _CJK_RE.search(topic) else "en"
+
 # Autocomplete is enrichment, not the mission: cap its share so it cannot crowd
 # the reserved templates out of the 8-result window (B11).
 _AC_BUDGET = 3
@@ -137,6 +160,11 @@ async def suggest_queries(
     5. Primary-source angle — **always present**, and **domain-adaptive** (B29):
        policy/legal/gov topics get official sources (`site:.gov OR site:europa.eu
        OR site:.int`); everything else gets `site:github.com` (dev/code default)
+
+    The word-based angles (criticism / alternatives / problems / comparison) are
+    **language-localized** (B32): a Japanese (CJK) topic gets 批判 / 代替案 /
+    問題点 / 比較 instead of English, so the queries actually surface Japanese
+    content. site:/year angles are language-agnostic.
     6. Entity drill-downs from context, then overflow templates (`problems
        limitations`, `vs`, `site:arxiv.org`) and any leftover autocomplete
 
@@ -168,7 +196,7 @@ async def suggest_queries(
     # Run autocomplete and template generation concurrently
     ac_task = asyncio.create_task(_fetch_autocomplete(topic))
     reserved_queries = _build_template_queries(topic, _reserved_templates(topic))
-    extra_queries = _build_template_queries(topic, _EXTRA_TEMPLATES)
+    extra_queries = _build_template_queries(topic, _extra_templates(topic))
 
     ac_suggestions = await ac_task
 
@@ -288,9 +316,15 @@ def _primary_source_template(topic: str) -> str:
 
 
 def _reserved_templates(topic: str) -> list[str]:
-    """Reserved viewpoint templates with the domain-adaptive primary source (B29)
-    appended as the guaranteed primary-source slot."""
-    return [*_RESERVED_BASE, _primary_source_template(topic)]
+    """Reserved viewpoint templates: language-localized base (B32) + the
+    domain-adaptive primary source (B29) as the guaranteed primary-source slot."""
+    base = _RESERVED_BASE_JA if _topic_lang(topic) == "ja" else _RESERVED_BASE
+    return [*base, _primary_source_template(topic)]
+
+
+def _extra_templates(topic: str) -> list[str]:
+    """Overflow viewpoint templates, language-localized (B32)."""
+    return _EXTRA_TEMPLATES_JA if _topic_lang(topic) == "ja" else _EXTRA_TEMPLATES
 
 
 def _build_template_queries(

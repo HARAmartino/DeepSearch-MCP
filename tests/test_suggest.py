@@ -630,3 +630,47 @@ class TestB29DomainAdaptivePrimarySource:
         assert "criticism" in combined
         assert "site:" in combined  # primary-source angle survived the AC cap
         assert 3 <= len(data) <= 8
+
+
+class TestB32LanguageAdaptiveTemplates:
+    """B32: viewpoint words localize to the topic's language. A Japanese (CJK)
+    topic must get Japanese angles (批判/代替案/問題点/比較), not English ones —
+    English words appended to a JP query don't surface Japanese content."""
+
+    @patch("src.deepsearch_mcp.tools.suggest._fetch_autocomplete", new_callable=AsyncMock)
+    async def test_japanese_topic_gets_japanese_words(self, mock_ac):
+        mock_ac.return_value = []
+        data = _parse_suggestions(await suggest_queries(topic="日本 新興 ガジェット メーカー"))
+        combined = " ".join(data)
+        assert "批判" in combined, f"no Japanese criticism angle: {data}"
+        assert "代替案" in combined, f"no Japanese alternatives angle: {data}"
+        # English viewpoint words must NOT be appended to a Japanese query.
+        assert "criticism" not in combined and "alternatives" not in combined
+        assert " vs" not in combined
+
+    @patch("src.deepsearch_mcp.tools.suggest._fetch_autocomplete", new_callable=AsyncMock)
+    async def test_english_topic_unchanged(self, mock_ac):
+        mock_ac.return_value = []
+        data = _parse_suggestions(await suggest_queries(topic="React Server Components"))
+        combined = " ".join(data).lower()
+        assert "criticism" in combined and "alternatives" in combined
+        assert "批判" not in combined
+
+    def test_topic_lang_detection(self):
+        from src.deepsearch_mcp.tools.suggest import _topic_lang
+        assert _topic_lang("三笘 活躍") == "ja"          # kanji
+        assert _topic_lang("ガジェット メーカー") == "ja"  # katakana
+        assert _topic_lang("ひらがな") == "ja"            # hiragana
+        assert _topic_lang("React Server Components") == "en"
+        assert _topic_lang("GPT-5 benchmarks") == "en"
+
+    @patch("src.deepsearch_mcp.tools.suggest._fetch_autocomplete", new_callable=AsyncMock)
+    async def test_japanese_b11_guarantees_hold(self, mock_ac):
+        # The reserve/cap mission guarantees still apply on the localized path:
+        # ≥1 criticism (批判) + ≥1 primary-source (site:) survive a full AC set.
+        mock_ac.return_value = ["三笘 年収", "三笘 結婚", "三笘 移籍", "三笘 wiki"]
+        data = _parse_suggestions(await suggest_queries(topic="三笘"))
+        combined = " ".join(data)
+        assert "批判" in combined          # criticism angle survived the AC cap
+        assert "site:" in combined         # primary-source angle survived
+        assert 3 <= len(data) <= 8

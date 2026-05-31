@@ -133,6 +133,18 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Changed — suggest_queries viewpoint angles are now language-adaptive (2026-06-01, B32)
+- `suggest_queries` appended English viewpoint words ("criticism", "alternatives",
+  "problems limitations", "vs") to every topic — so a Japanese query got English
+  angles that don't surface Japanese content (a live "日本 新興 ガジェット メーカー"
+  run made the echo-chamber breaker a silent no-op). It now detects a CJK
+  (Japanese) topic and localizes those angles to 批判 / 代替案 / 問題点 デメリット /
+  比較. The `site:` and year angles are language-agnostic and unchanged.
+- English topics are unchanged; the B11 reserve/cap guarantees and B29
+  domain-adaptive primary source still apply on the localized path. Japanese-first
+  (the observed need); extensible to more languages. Tests:
+  `tests/test_suggest.py::TestB32LanguageAdaptiveTemplates`.
+
 ### Changed — suggest_queries primary-source angle is now domain-adaptive (2026-06-01, B29)
 - `suggest_queries` previously always offered `site:github.com` as its
   guaranteed primary-source angle — useless for policy/legal/government

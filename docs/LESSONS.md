@@ -41,6 +41,7 @@ rest are <1 week old and genuinely load-bearing. (Prev: 2026-05-29.)
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [A query-generating tool is language-blind by default — localize the WORDS, keep the operators](#2026-06-01-active-a-query-generating-tool-is-language-blind-by-default--localize-the-words-keep-the-operators) |
 | 2026-06-01 | [ACTIVE] | [A "primary source" is domain-relative — adapt the angle to the topic, and match signals at word level](#2026-06-01-active-a-primary-source-is-domain-relative--adapt-the-angle-to-the-topic-and-match-signals-at-word-level) |
 | 2026-06-01 | [ACTIVE] | [`re.IGNORECASE` silently defeats a `[A-Z]` capital-letter intent — scope case with `(?-i:…)`; and a benchmark earns its keep by surfacing exactly this](#2026-06-01-active-reignorecase-silently-defeats-a-a-z-capital-letter-intent--scope-case-with---i--and-a-benchmark-earns-its-keep-by-surfacing-exactly-this) |
 | 2026-06-01 | [ACTIVE] | [A composite benchmark should compose validated measures, not invent metrics — and must carry its own "proxy, not proof" caveat](#2026-06-01-active-a-composite-benchmark-should-compose-validated-measures-not-invent-metrics--and-must-carry-its-own-proxy-not-proof-caveat) |
@@ -88,6 +89,33 @@ rest are <1 week old and genuinely load-bearing. (Prev: 2026-05-29.)
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] A query-generating tool is language-blind by default — localize the WORDS, keep the operators
+
+- **Context (B32).** `suggest_queries` appended English viewpoint words
+  ("criticism", "alternatives", "vs") to every topic. For a Japanese research run
+  ("日本 新興 ガジェット メーカー") that meant the echo-chamber-breaking angles were
+  English — which don't surface Japanese content. The tool's whole mission
+  silently no-op'd on non-English topics; it *looked* like it worked (it returned
+  queries), it just returned useless ones.
+- **Rule.** **A tool that *generates natural-language queries* must localize the
+  language-bearing parts to the topic's language — but only those parts.** Split
+  the template into language-BEARING tokens (the viewpoint words: criticism →
+  批判, alternatives → 代替案) and language-AGNOSTIC ones (`site:`, year filters,
+  operators), and translate only the former. Translating the operators would
+  break them; leaving the words English breaks the intent.
+- **Detect from the data you have.** No `region` is passed to this tool, so infer
+  language from the topic's *script* (CJK presence ⇒ Japanese). Cheap, dependency-
+  free, and correct for the case that matters. A "looks like it worked" failure
+  (plausible output, wrong language) is invisible without a real non-English run —
+  this only surfaced via live JP dogfooding, like B28/B29 before it.
+- **Same shape as B29.** B29 made the primary-source angle *domain*-adaptive;
+  B32 makes the viewpoint words *language*-adaptive. Both: a hard-coded default
+  (English / dev) silently failed a whole class of research; adapt the slot, keep
+  the default for the common case. Japanese-first, extends with usage (B25).
+- **Mechanism / tests:** `tools/suggest.py::_topic_lang` / `_RESERVED_BASE_JA` /
+  `_EXTRA_TEMPLATES_JA` + `tests/test_suggest.py::TestB32LanguageAdaptiveTemplates`.
+  Verified live (JP → 批判/代替案/比較, EN unchanged).
 
 ### [2026-06-01] [ACTIVE] A "primary source" is domain-relative — adapt the angle to the topic, and match signals at word level
 
