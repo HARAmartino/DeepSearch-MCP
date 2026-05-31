@@ -98,23 +98,28 @@ def lesson_tags() -> str:
         return f"error: {exc}"
 
 
-def next_backlog() -> list[str]:
-    """Best-effort: open backlog rows in METHODOLOGY.md §5 (not DONE/struck)."""
-    f = ROOT / "docs" / "METHODOLOGY.md"
+def next_backlog(text: str | None = None) -> list[str]:
+    """Open backlog rows in METHODOLOGY.md §5 — excludes resolved ones.
+
+    A row is resolved (and skipped) if it is struck (`~~`), marked `DONE`, or
+    marked `Declined` (a recorded won't-do decision is not actionable work — the
+    B27 fix; previously a declined row surfaced as the "next" item)."""
+    if text is None:
+        try:
+            text = (ROOT / "docs" / "METHODOLOGY.md").read_text(encoding="utf-8")
+        except OSError:
+            return []
     out: list[str] = []
-    try:
-        for line in f.read_text(encoding="utf-8").splitlines():
-            # rows look like: | **B3** | ... |   — skip struck (~~) or DONE
-            m = re.match(r"\|\s*\*\*(B\d+)\*\*\s*\|\s*([^|]+)\|", line)
-            if not m:
-                continue
-            bid, desc = m.group(1), m.group(2).strip()
-            if "DONE" in desc or "~~" in line:
-                continue
-            short = (desc[:60] + "…") if len(desc) > 60 else desc
-            out.append(f"{bid}: {short}")
-    except Exception:
-        pass
+    for line in text.splitlines():
+        # rows look like: | **B3** | ... |   — struck rows won't match the regex.
+        m = re.match(r"\|\s*\*\*(B\d+)\*\*\s*\|\s*([^|]+)\|", line)
+        if not m:
+            continue
+        if "~~" in line or "DONE" in line or "Declined" in line:
+            continue
+        bid, desc = m.group(1), m.group(2).strip()
+        short = (desc[:60] + "…") if len(desc) > 60 else desc
+        out.append(f"{bid}: {short}")
     return out[:3]
 
 
@@ -203,7 +208,8 @@ def main() -> int:
     print(f"  Last audit     : {last_audit()}")
     print(f"  MTTI (backlog) : {mtti_line()}")
     backlog = next_backlog()
-    print("  Next backlog   :", backlog[0] if backlog else "(none parsed — see METHODOLOGY.md §5)")
+    print("  Next backlog   :", backlog[0] if backlog
+          else "(no open items — backlog clear; see METHODOLOGY.md §5)")
     for item in backlog[1:]:
         print(f"                   {item}")
     print("-" * 68)

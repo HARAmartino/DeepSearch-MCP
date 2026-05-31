@@ -107,19 +107,35 @@ class TestStatusReaders:
         out = status.lesson_tags()
         assert "active" in out and "stale" in out
 
-    def test_next_backlog_excludes_done_and_struck(self):
-        items = status.next_backlog()
-        assert isinstance(items, list)
-        assert len(items) <= 3
-        joined = " ".join(items)
-        # B5 is marked DONE/struck in METHODOLOGY §5 — must never surface.
-        assert "B5:" not in joined
+    # Deterministic injected §5 fixture: one open, one struck-DONE, one inline
+    # DONE, and one Declined (B27 — the row that used to surface as "next").
+    _BACKLOG = (
+        "| # | Improvement | Impact | Blocked on |\n"
+        "|---|---|---|---|\n"
+        "| **B90** | An open improvement worth doing | impact | — |\n"
+        "| ~~**B91**~~ | ~~struck done~~ | — | **✅ DONE 2026-05-30** |\n"
+        "| **B92** | inline done row | — | **✅ DONE 2026-05-31** |\n"
+        "| **B93** | a declined idea | — | **Declined 2026-05-30:** bloats repo |\n"
+    )
 
     def test_next_backlog_surfaces_open_items(self):
-        items = status.next_backlog()
-        # At least one open backlog item should parse (B1/B2/B3…).
-        assert items, "expected at least one open backlog row to parse"
-        assert items[0].startswith("B")
+        items = status.next_backlog(self._BACKLOG)
+        assert items == ["B90: An open improvement worth doing"]
+
+    def test_next_backlog_excludes_done_and_struck(self):
+        joined = " ".join(status.next_backlog(self._BACKLOG))
+        assert "B91:" not in joined  # struck
+        assert "B92:" not in joined  # inline DONE
+
+    def test_next_backlog_excludes_declined(self):
+        # B27: a Declined row is a recorded won't-do, not actionable "next" work.
+        joined = " ".join(status.next_backlog(self._BACKLOG))
+        assert "B93:" not in joined
+
+    def test_next_backlog_live_returns_no_resolved_items(self):
+        # Live smoke: whatever parses, none of it is a DONE/Declined row.
+        for item in status.next_backlog():
+            assert "DONE" not in item and "Declined" not in item
 
 
 # ---------------------------------------------------------------------------

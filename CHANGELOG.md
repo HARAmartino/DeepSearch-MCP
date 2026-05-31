@@ -133,6 +133,14 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Fixed — status.py no longer lists a declined backlog row as "next" (2026-06-01, B27)
+- `scripts/status.py` `next_backlog()` now skips `Declined` rows (a recorded
+  won't-do is not actionable work), in addition to `DONE`/struck rows — B10 had
+  been surfacing as the "Next backlog" item. The empty-backlog message also
+  changed from the misleading "(none parsed)" to "(no open items — backlog
+  clear)". `next_backlog()` is now text-injectable for deterministic tests.
+- Tests: `tests/test_scripts.py::TestStatusReaders::test_next_backlog_excludes_declined`.
+
 ### Added — Operations Rule 6: extraction-length drift alert (2026-06-01, B6)
 - `evals/telemetry_diff.py` now flags a `⚠ Rule 6` finding when `read_article`'s
   average successful-extraction token count drifts ≥ ±10% between two snapshots

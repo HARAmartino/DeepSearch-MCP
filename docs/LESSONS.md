@@ -36,6 +36,7 @@ Each entry carries one status tag:
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [An orientation tool must show only ACTIONABLE state — and its edge cases hide until the happy path is exhausted](#2026-06-01-active-an-orientation-tool-must-show-only-actionable-state--and-its-edge-cases-hide-until-the-happy-path-is-exhausted) |
 | 2026-06-01 | [ACTIVE] | [Detect silent drift with a metric you already store + a sample-size guard so it can't cry wolf](#2026-06-01-active-detect-silent-drift-with-a-metric-you-already-store--a-sample-size-guard-so-it-cant-cry-wolf) |
 | 2026-06-01 | [ACTIVE] | [A single snapshot describes; a diff judges — build the before/after view for release questions](#2026-06-01-active-a-single-snapshot-describes-a-diff-judges--build-the-beforeafter-view-for-release-questions) |
 | 2026-06-01 | [ACTIVE] | [Match the signal's mechanism to its meaning — "skip" vs "corroborate" are opposite affordances](#2026-06-01-active-match-the-signals-mechanism-to-its-meaning--skip-vs-corroborate-are-opposite-affordances) |
@@ -78,6 +79,31 @@ Each entry carries one status tag:
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] An orientation tool must show only ACTIONABLE state — and its edge cases hide until the happy path is exhausted
+
+- **Context (B27).** `status.py`'s "Next backlog" surfaced **B10**, a row that had
+  been *Declined* (a recorded won't-do). The filter skipped `DONE`/struck rows
+  but not `Declined` ones, so a non-actionable decision was offered as the next
+  thing to work on.
+- **Two-layer lesson.** (1) **A "what to do next" tool must filter to *actionable*
+  state, and "resolved" has more than one shape** — done, struck, *and declined*
+  are all "not work to pick up". Enumerate every resolved state, not just the
+  common one. (2) **The bug only appeared once the backlog was fully consumed** —
+  while open items existed, the declined row was never the *top* item, so it
+  never showed. Edge-case behaviour of your own tooling (empty list, only-resolved
+  list) stays invisible until the happy path runs out; dogfood those end states
+  deliberately rather than waiting to stumble on them.
+- **Also fixed the empty-state message.** "(none parsed — see §5)" conflated
+  *parse failure* with *nothing open*. A cleared backlog now says "(no open
+  items — backlog clear)" — don't let a success state read like an error.
+- **Testability.** Made `next_backlog(text=None)` injectable (same pattern as
+  B2's `mtti` / `parse_backlog_dates`) so filtering is tested on a controlled
+  fixture, not on the live backlog — which had become empty and silently broke
+  the old "expects ≥1 open item" assertion.
+- **Mechanism / tests:** `scripts/status.py::next_backlog` +
+  `tests/test_scripts.py` (`test_next_backlog_excludes_declined`, injected-text
+  open/done/struck/declined fixture).
 
 ### [2026-06-01] [ACTIVE] Detect silent drift with a metric you already store + a sample-size guard so it can't cry wolf
 
