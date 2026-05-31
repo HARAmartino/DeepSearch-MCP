@@ -7,6 +7,10 @@
 > `docs/*.md` files referenced from §6 below. If you find yourself adding more
 > than a paragraph to a non-pointer section, ask whether it belongs in a
 > dedicated doc instead. Prime Directive 1 applies to this file too.
+>
+> **This is the single source of truth for every AI agent.** `AGENTS.md` (Codex
+> et al.) and `.github/copilot-instructions.md` (GitHub Copilot) are thin
+> pointers to this file — **edit rules only here**, never in the pointers.
 
 ---
 

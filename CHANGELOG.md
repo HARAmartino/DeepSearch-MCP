@@ -133,6 +133,16 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Added — Cross-agent instruction pointers (2026-05-31)
+- `AGENTS.md` (Codex / Cursor / Gemini / the cross-tool standard) and
+  `.github/copilot-instructions.md` (GitHub Copilot) now point every AI agent at
+  `CLAUDE.md` as the **single source of truth**, instead of duplicating rules.
+  The pointers are static (they never need editing), so there is no two-file
+  sync burden: rules are maintained only in `CLAUDE.md`. Each pointer surfaces
+  the non-negotiables an external agent is most likely to skip (Prime
+  Directives, the 5-box Definition of Done, the BLOCKING Documentation Sync
+  rule, and running `python scripts/verify.py`).
+
 ### Changed — suggest_queries reserves slots for echo-chamber angles (2026-05-31, B11)
 - `suggest_queries` now **caps live autocomplete at 3 phrases** and reserves the
   8-result window for its viewpoint-shifting differentiators. The reserved tier
