@@ -24,8 +24,10 @@ Run:
 from __future__ import annotations
 
 import re
+import statistics
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -116,6 +118,80 @@ def next_backlog() -> list[str]:
     return out[:3]
 
 
+def _backlog_text() -> str:
+    try:
+        return (ROOT / "docs" / "METHODOLOGY.md").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def parse_backlog_dates(text: str) -> list[dict]:
+    """Parse §5 rows into reactive records carrying a `disc:` date.
+
+    The backlog is the project's alert→patch ledger (B2). A *reactive* row has
+    `disc:YYYY-MM-DD` (when first flagged); a closed row also has
+    `DONE YYYY-MM-DD` (when the patch landed). Rows without `disc:` are
+    proactive/process items and are intentionally skipped.
+    """
+    records: list[dict] = []
+    for line in text.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        m = re.search(r"\*\*(B\d+)\*\*", line)
+        if not m:
+            continue
+        disc = re.search(r"disc:(\d{4}-\d{2}-\d{2})", line)
+        if not disc:  # proactive / process item — not an alert
+            continue
+        done = re.search(r"DONE\s+(\d{4}-\d{2}-\d{2})", line)
+        records.append({
+            "id": m.group(1),
+            "disc": disc.group(1),
+            "done": done.group(1) if done else None,
+        })
+    return records
+
+
+def _days(a: str, b: str) -> int:
+    return (date.fromisoformat(b) - date.fromisoformat(a)).days
+
+
+def mtti(text: str | None = None, today: str | None = None) -> dict:
+    """MTTI from the backlog: closed lead-time stats + oldest open flag age."""
+    recs = parse_backlog_dates(text if text is not None else _backlog_text())
+    today = today or date.today().isoformat()
+    closed = [_days(r["disc"], r["done"]) for r in recs if r["done"]]
+    open_rows = [r for r in recs if not r["done"]]
+    open_ages = [(_days(r["disc"], today), r["id"]) for r in open_rows]
+    oldest = max(open_ages) if open_ages else None
+    return {
+        "closed_n": len(closed),
+        "mtti_mean": round(statistics.mean(closed), 1) if closed else None,
+        "mtti_median": round(statistics.median(closed), 1) if closed else None,
+        "open_n": len(open_rows),
+        "oldest_open": oldest,  # (age_days, id) or None
+    }
+
+
+def mtti_line() -> str:
+    """One-line MTTI summary for the status board (never raises)."""
+    try:
+        m = mtti()
+        if not m["closed_n"] and not m["open_n"]:
+            return "no dated backlog rows"
+        closed = (f"{m['mtti_median']}d median / {m['mtti_mean']}d mean "
+                  f"over {m['closed_n']} closed" if m["closed_n"]
+                  else "no closed reactive rows")
+        if m["oldest_open"]:
+            age, bid = m["oldest_open"]
+            openpart = f"; {m['open_n']} open, oldest {age}d ({bid})"
+        else:
+            openpart = f"; {m['open_n']} open"
+        return closed + openpart
+    except Exception as exc:
+        return f"error: {exc}"
+
+
 def main() -> int:
     print("=" * 68)
     print("  DeepSearch-MCP — STATUS (live; computed, not stored)")
@@ -125,6 +201,7 @@ def main() -> int:
     print(f"  Dogfood golden : {dogfood_baselines()}")
     print(f"  Lessons        : {lesson_tags()}")
     print(f"  Last audit     : {last_audit()}")
+    print(f"  MTTI (backlog) : {mtti_line()}")
     backlog = next_backlog()
     print("  Next backlog   :", backlog[0] if backlog else "(none parsed — see METHODOLOGY.md §5)")
     for item in backlog[1:]:

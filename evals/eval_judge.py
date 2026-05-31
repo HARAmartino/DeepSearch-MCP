@@ -45,6 +45,12 @@ _MD_CODE_RE = re.compile(r"```[\s\S]*?```", re.DOTALL)
 _MD_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 _YAML_FRONT_RE = re.compile(r"^---\n[\s\S]*?\n---\n", re.MULTILINE)
 
+# Below this much body content, "absence of noise" is not evidence of a clean
+# extraction — there is simply nothing to judge. Used to damp the noise reward
+# for thin/failed extractions (B26). Sits below a real short answer (~200 chars)
+# so substantive prose keeps full credit.
+_MIN_CONTENT_CHARS = 150
+
 
 @dataclass
 class JudgeScore:
@@ -87,6 +93,7 @@ def score_markdown(text: str) -> JudgeScore:
     body = _YAML_FRONT_RE.sub("", text).strip()
     lines = body.splitlines()
     total_lines = max(len(lines), 1)
+    total_chars = len(body)
 
     # --- Axis 1: Noise Ratio (0-4 pts) ---
     # Find all noise matches
@@ -98,7 +105,18 @@ def score_markdown(text: str) -> JudgeScore:
 
     # Scale: 0 noise → 4 pts; 25% noise → 2 pts; 50%+ noise → 0 pts
     noise_score = max(0.0, 4.0 - (noise_ratio * 16.0))
-    noise_score = round(min(4.0, noise_score), 2)
+    noise_score = min(4.0, noise_score)
+
+    # Content-sufficiency gate (B26): "no noise" is vacuous when there's barely
+    # any content. A failed/thin extraction ("# Title / Loading…", ~20 chars)
+    # would otherwise earn the full 4/4 noise reward simply for lacking noise
+    # patterns — making an empty read look mediocre-but-okay (5.0/10). Scale the
+    # noise reward by how much content there is to actually judge. Real articles
+    # (hundreds+ of chars → factor 1.0) are unaffected, so the ≥8.5 gate region
+    # is untouched; only near-empty bodies are damped. Calibrated against the
+    # consumer judgment in evals/calibrate_judge.py (B1).
+    content_sufficiency = min(1.0, total_chars / _MIN_CONTENT_CHARS)
+    noise_score = round(noise_score * content_sufficiency, 2)
 
     # --- Axis 2: Markdown Structure (0-3 pts) ---
     structure_score = 0.0
@@ -151,9 +169,9 @@ def score_markdown(text: str) -> JudgeScore:
         sum(len(ln) for ln in prose_lines) / len(prose_lines)
         if prose_lines else 0
     )
-    total_chars = len(body)
 
-    # Heuristic: avg prose line length > 60 chars suggests real prose (not nav menus)
+    # Heuristic: avg prose line length > 60 chars suggests real prose (not nav
+    # menus). (total_chars computed once near the top, before the noise axis.)
     if avg_line_len >= 80:
         density_score = 3.0
     elif avg_line_len >= 60:
@@ -178,7 +196,8 @@ def score_markdown(text: str) -> JudgeScore:
     total = round(noise_score + structure_score + density_score, 2)
 
     details = (
-        f"noise={noise_score}/4 (ratio={noise_ratio:.1%}, hits={len(noise_hits)}) | "
+        f"noise={noise_score}/4 (ratio={noise_ratio:.1%}, hits={len(noise_hits)}, "
+        f"content={content_sufficiency:.2f}) | "
         f"structure={structure_score}/3 "
         f"(h1={effective_has_h1}, hlevels={heading_levels}, list={has_list}, code={has_code_block}) | "
         f"density={density_score}/3 (prose_avg={avg_line_len:.0f}ch, total={total_chars}ch)"

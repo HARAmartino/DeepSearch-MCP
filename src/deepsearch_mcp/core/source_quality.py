@@ -68,6 +68,18 @@ _AUTH_DOMAINS: frozenset[str] = frozenset({
     "github.com", "modelcontextprotocol.io",
     # Editorially-maintained reference
     "wikipedia.org",
+    # Industry analysts / research / consulting (B24, 2026-05-31) — their
+    # published reports are editorially controlled and widely cited for tech
+    # trends, markets, and funding data.
+    "gartner.com", "forrester.com", "idc.com",
+    "deloitte.com", "mckinsey.com", "bcg.com", "pwc.com", "accenture.com",
+    "computer.org",        # IEEE Computer Society
+    "crunchbase.com",      # incl. news.crunchbase.com (funding journalism)
+    "hbr.org", "pewresearch.org",
+    # NOTE: deliberately NOT forbes.com / inc.com / entrepreneur.com — these
+    # run large *contributor* networks whose quality is per-author, not
+    # per-domain, so the domain can't certify the article (same precision
+    # principle as refusing to guess `low_quality`).
 })
 
 

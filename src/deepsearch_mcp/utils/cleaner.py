@@ -200,6 +200,16 @@ _WIKI_CHROME_MARKERS = (
     "current status",
     "number of employees",
     "traded as",
+    # software / programming-language infoboxes (B25 — added 2026-05-31 after the
+    # Rust Wikipedia language infobox leaked). Only the keys that are UNIQUE to a
+    # language infobox and are never normal comparison-table columns. "filename
+    # extension" (no trailing "s") matches both singular and plural.
+    # (Deliberately NOT "paradigm"/"first appeared"/"stable release": those are
+    # exactly the columns of "Comparison of programming languages / software"
+    # tables, so including them would risk stripping a legit leading comparison
+    # table — same caution as the company-infobox keys above.)
+    "typing discipline",
+    "filename extension",
 )
 _MAX_LEADING_SCAN = 60  # don't scan an unbounded "leading region"
 

@@ -36,6 +36,15 @@ Each entry carries one status tag:
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-05-31 | [ACTIVE] | [Enrichment must not crowd out the differentiator — cap the optional input, reserve slots for the mission](#2026-05-31-active-enrichment-must-not-crowd-out-the-differentiator--cap-the-optional-input-reserve-slots-for-the-mission) |
+| 2026-05-31 | [ACTIVE] | [Fire-and-forget work needs a drain barrier in tests — put it in the gating (autouse) fixture](#2026-05-31-active-fire-and-forget-work-needs-a-drain-barrier-in-tests--put-it-in-the-gating-autouse-fixture) |
+| 2026-05-31 | [ACTIVE] | [Hand-written fixtures are a regression net, not a discovery tool — expand them for breadth](#2026-05-31-active-hand-written-fixtures-are-a-regression-net-not-a-discovery-tool--expand-them-for-breadth) |
+| 2026-05-31 | [ACTIVE] | [Measure a meta-metric off the ledger you already maintain, not a new empty store](#2026-05-31-active-measure-a-meta-metric-off-the-ledger-you-already-maintain-not-a-new-empty-store) |
+| 2026-05-31 | [ACTIVE] | [Changing a gate's scorer: prove the gate region is byte-identical, fix only the broken range](#2026-05-31-active-changing-a-gates-scorer-prove-the-gate-region-is-byte-identical-fix-only-the-broken-range) |
+| 2026-05-31 | [ACTIVE] | [Calibrate the quality proxy against the real consumer — and trust it only where the gate lives](#2026-05-31-active-calibrate-the-quality-proxy-against-the-real-consumer--and-trust-it-only-where-the-gate-lives) |
+| 2026-05-31 | [ACTIVE] | [Curated marker lists extend 3+ times — incompleteness is structural, not a bug](#2026-05-31-active-curated-marker-lists-extend-3-times--incompleteness-is-structural-not-a-bug) |
+| 2026-05-31 | [ACTIVE] | [If you hand-write the same orchestration scaffold N times, bake it into a command](#2026-05-31-active-if-you-hand-write-the-same-orchestration-scaffold-n-times-bake-it-into-a-command) |
+| 2026-05-31 | [ACTIVE] | [Document the capabilities the agent can't discover — the docstring is the API](#2026-05-31-active-document-the-capabilities-the-agent-cant-discover--the-docstring-is-the-api) |
 | 2026-05-30 | [ACTIVE] | [The stack was UTF-8/English-centric — non-English usage broke 3 things](#2026-05-30-active-the-stack-was-utf-8english-centric--non-english-usage-broke-3-things) |
 | 2026-05-30 | [ACTIVE] | [Strip noise by position + marker, not by type — leading Wikipedia chrome](#2026-05-30-active-strip-noise-by-position--marker-not-by-type--leading-wikipedia-chrome) |
 | 2026-05-30 | [ACTIVE] | [Dedup by marking, not removing — duplicates are corroboration](#2026-05-30-active-dedup-by-marking-not-removing--duplicates-are-corroboration) |
@@ -65,6 +74,241 @@ Each entry carries one status tag:
 
 ---
 
+### [2026-05-31] [ACTIVE] Enrichment must not crowd out the differentiator — cap the optional input, reserve slots for the mission
+
+- **Context (B11).** `suggest_queries` mixes DDG autocomplete ("real user
+  patterns") with viewpoint-shifting templates (criticism / alternatives /
+  primary sources). Once live autocomplete actually worked (it had been dead),
+  its 4 phrases filled the 8-result window and pushed the `site:github` /
+  `site:arxiv` templates off the end — silently gutting the tool's whole reason
+  to exist (breaking echo chambers). Worse, autocomplete for a *person* is
+  tabloid noise ("net worth", "husband", "age").
+- **Rule.** When a feature blends a **mission-critical** signal with an
+  **opportunistic/enrichment** one, the enrichment must be **capped** and the
+  mission signal must have **reserved capacity** — never let "whatever the API
+  returned" displace the thing the tool is *for*. Here: cap autocomplete at
+  `_AC_BUDGET=3` and put the differentiators in a reserved tier sized so
+  `capped_enrichment + reserved ≤ window`, guaranteeing they always survive.
+- **The trap is "more data is better".** A working data source (autocomplete)
+  felt like pure upside, so it was placed first and uncapped. But *relevance to
+  the query* ≠ *value to the mission*: the most popular related searches are
+  often the least useful for escaping an echo chamber. An input being good is
+  not a reason to let it consume the whole budget.
+- **Back-compat kept deliberately.** Autocomplete still *leads* the list (an
+  existing test pins this) — the fix capped its *share*, it didn't reorder. A
+  reserve can be added without inverting a documented contract.
+- **Mechanism / tests:** `tools/suggest.py` (`_RESERVED_TEMPLATES`,
+  `_EXTRA_TEMPLATES`, `_AC_BUDGET`, capped+reserved merge) +
+  `tests/test_suggest.py::TestReservedSlotsB11`.
+
+### [2026-05-31] [ACTIVE] Fire-and-forget work needs a drain barrier in tests — put it in the gating (autouse) fixture
+
+- **Context (B8).** `@track` schedules its DB write with
+  `asyncio.create_task(...)` and returns immediately (correct: telemetry must
+  never add latency). In tests, a tracked call whose write isn't awaited leaves
+  an aiosqlite background-thread write racing pytest-asyncio's loop teardown →
+  intermittent `PytestUnhandledThreadExceptionWarning`. Benign in prod (the OS
+  reaps the process), but noisy and fatigue-inducing in CI.
+- **Rule.** **Any fire-and-forget background work needs exactly one deterministic
+  drain point per test, and it belongs in the autouse/gating fixture, not in
+  each test body.** Per-test manual drains rot: the moment one test legitimately
+  doesn't assert on the side effect, it skips the drain and the race returns.
+  An autouse teardown that drains makes the guarantee structural. (Keep manual
+  drains only where the test must read the side effect *within* its body —
+  there the autouse teardown runs too late.)
+- **Scoping gotcha.** Under `asyncio_mode = "auto"`, an autouse *async* fixture
+  defined in the test module coexists fine with the module's *sync* tests
+  (verified: all 29 pass). Defining it in the module (not a shared conftest)
+  keeps the drain local to the tests that create tasks — no cross-module cost.
+- **Testing a nondeterministic symptom.** The warning fires only on a teardown
+  race, so a "fails-before" assertion on the warning itself is flaky. Pin the
+  **invariant the fix relies on** instead: make the write provably slow so a
+  task is genuinely pending, then assert `drain()` clears `_pending_tasks`.
+- **Mechanism / tests:** `tests/test_telemetry.py` (`_drain_telemetry_after_test`
+  autouse fixture; `TestDrainSafety::test_drain_clears_a_pending_write`);
+  relies on `core/telemetry.py::drain()` + the `_pending_tasks` strong-ref set.
+
+### [2026-05-31] [ACTIVE] Hand-written fixtures are a regression net, not a discovery tool — expand them for breadth
+
+- **Context (B3).** Expanded the extraction gauntlet from 5 to 10 site
+  categories (forum Q&A, academic, government, press release, e-commerce). The
+  tension: anti-pattern #6 says hand-written fixtures "only contain noise you
+  already anticipated", so a gauntlet can't *discover* new noise (only
+  `live_check`/dogfooding does that).
+- **Rule — know what each test is FOR.** A hand-written fixture corpus is a
+  **regression net**: it pins "the cleaner still handles category X well" so a
+  future refactor can't silently break forum/academic/gov/press/commerce
+  extraction. That value scales with **category breadth**, not with cleverer
+  noise. So expand the gauntlet to cover more *real research surfaces*; don't
+  pretend it substitutes for live dogfooding (keep both — §6 cadence).
+- **Concrete extraction note surfaced while writing fixtures.** trafilatura
+  renders a **single-line** `<pre><code>` as *inline* code, not a fenced block,
+  and inline `<code>x</code>` tokens mid-sentence fragment the surrounding prose
+  onto separate lines (hurting density). Multi-line code blocks render as proper
+  fenced ```blocks. Implication: realistic code fixtures should use multi-line
+  snippets — and an agent reading a terse Q&A page may see code as inline spans.
+- **Gate discipline.** Adding diverse categories pulled the average toward the
+  gate (8.5 exactly at first). Rather than weaken the gate, I made the weakest
+  fixture (a trivial single-line-code Q&A) *more realistic* (multi-line code, as
+  real Stack Overflow answers have), which lifted it honestly to a 8.72 average.
+  Give a gate margin by improving representativeness, never by lowering the bar.
+- **Mechanism / tests:** `tests/test_extractor.py` (`GAUNTLET_FIXTURES` now 10;
+  `TestGauntletScores::test_new_categories_meet_floor`,
+  `test_corpus_has_at_least_ten_categories`).
+
+### [2026-05-31] [ACTIVE] Measure a meta-metric off the ledger you already maintain, not a new empty store
+
+- **Context (B2).** The backlog asked to "add a `patch_landed_at` column to the
+  `telemetry` schema" to measure MTTI (mean time to improvement). Investigation:
+  a per-call telemetry *event* has no "patch", and alerts are recomputed
+  statelessly on every `analyze_telemetry` run (never persisted) — so there is
+  no `alert_first_seen` to subtract from, and nothing would ever populate a new
+  table. Building it = dead infra (cf. the "no data is not healthy" lesson).
+- **Rule.** **Before adding a new store/schema for a metric, ask what *already*
+  records the events you'd measure.** Here the project's real, continuously
+  maintained alert→patch ledger is the **backlog** itself (`METHODOLOGY §5`):
+  every reactive row is a discovered problem, every DONE is a landed fix. Adding
+  a `disc:`/`DONE` date convention + a parser in `status.py` measures MTTI from
+  *real* data with **zero new write-friction** and no second source of truth to
+  drift. A metric that rides the artifact you already keep accurate is honest by
+  construction; a metric that needs a new manually-populated store will sit at
+  "no data" and lie.
+- **Honest negative finding.** The computed MTTI is **≈ 0 days** — this agent
+  fixes flagged issues in the same session it finds them. A meta-metric that
+  comes out trivial is still worth shipping: it (a) records the true baseline so
+  a future *regression* (a lingering item) becomes visible, and (b) redirected
+  the useful signal to **oldest-open-flag age**, which actually feeds "what to
+  do next" (Trigger Hierarchy §5). Don't suppress a true-but-boring result.
+- **Reframing precedent.** Same shape as B1 (calibrate against the *LLM*
+  consumer, not a human) and B23 — a literally-specified backlog item was
+  *mis-specified*; implementing its **intent** beat implementing its letter.
+- **Mechanism / tests:** `scripts/status.py` (`parse_backlog_dates`, `mtti`,
+  `mtti_line`) + `tests/test_scripts.py::TestBacklogMTTI`; convention documented
+  in `docs/METHODOLOGY.md` §5 header.
+
+### [2026-05-31] [ACTIVE] Changing a gate's scorer: prove the gate region is byte-identical, fix only the broken range
+
+- **Context (B26).** B1 calibration showed `eval_judge` over-rated thin/empty
+  extractions (a `"# Title / Loading…"` fragment scored 5.0/10 — "no noise" read
+  as "clean"). Fixing it means editing `score_markdown`, which **is the ≥8.5
+  Gauntlet merge gate** — a careless change could silently shift what passes.
+- **Rule.** When you modify the function behind a gate, the change must be
+  **localized to the broken range and leave the gate's operating region
+  provably unchanged.** Don't just check "tests still pass" — show the gate
+  region is *byte-identical*. Here: scale the noise reward by
+  `min(1, len(body)/150)`, which is 1.0 for any real article (hundreds+ chars)
+  and only bites near-empty bodies. Evidence: the 4 golden fixtures + the
+  code-heavy sample scored *exactly* the same before/after, while the thin
+  fragment dropped 5.0→1.59 and overall judge↔consumer r rose 0.79→0.932.
+- **Corollary.** A calibration harness (`calibrate_judge.py`) isn't just a
+  one-time report — it's the **regression instrument** that proves a scorer
+  change improved the low range without disturbing the gate. Re-run it as the
+  "before/after" check whenever you touch the scorer.
+- **Left deliberately unfixed.** The remaining low-range divergences are
+  *under*-ratings of content-that-contains-noise (paywall CTA, ad line). That is
+  intentional gate behavior — penalizing noise is the whole point — so chasing
+  those would weaken the gate, not improve it. Know which divergences to fix and
+  which to leave.
+- **Mechanism / tests:** `evals/eval_judge.py` (`_MIN_CONTENT_CHARS`,
+  content-sufficiency gate) + `tests/test_judge.py::TestThinContentGate`.
+
+### [2026-05-31] [ACTIVE] Calibrate the quality proxy against the real consumer — and trust it only where the gate lives
+
+- **Finding (B1).** `eval_judge`'s 3-axis heuristic (noise/structure/density →
+  0–10) gates the Gauntlet at ≥ 8.5. Calibrating it against the **consumer's**
+  holistic rating (`evals/calibrate_judge.py`, 11 samples) gave **Pearson
+  r = 0.79** — and, crucially, the **gate region is well-calibrated**: every
+  high-quality anchor lands 8.5–9.25 vs. a consumer 8.5–9.0. So the 8.5 gate
+  genuinely means "good", which was the open question.
+- **Reframing that mattered.** The backlog said "calibrate against *human*
+  ratings (blocker: human availability)". Wrong target: the consumer of
+  `read_article` is the **LLM agent**, not a human. Calibrating against the
+  agent-as-consumer is both *more correct* (it's who actually reads the output)
+  and *unblocked*. **Rule: calibrate a quality proxy against whoever actually
+  consumes the output — for an LLM tool, that's the LLM, not a person.**
+- **Two real miscalibrations, both in the LOW range (→ B26).** (1) A near-empty
+  `"# Title / Loading…"` fragment scores **5.0/10** because the noise axis pays
+  a full 4/4 for *absence of noise* even with no content — **empty reads as
+  clean.** (2) Clean-but-unstructured/short prose is under-rated (no headings
+  ⇒ −1.5). **A single 0–10 number hides axis-level divergence; "well-calibrated"
+  is range-specific — verify the region your gate actually uses, and don't
+  assume it generalizes to the rest of the scale.**
+- **Self-reference guard.** I wrote both the samples and the ratings, so this
+  risks the "fixtures aren't real usage" trap. Mitigations: 4 of 11 samples are
+  *real* golden fixtures; ratings were set on a written rubric *before* reading
+  heuristic scores; and the worst divergence (thin_fragment, Δ +4.0) is reported
+  honestly rather than massaged away. The value is in the *divergences*, not the
+  headline r.
+- **Mechanism / tests:** `evals/calibrate_judge.py` (`calibrate`, `pearson`,
+  `load_samples`) + `tests/test_judge.py` (`TestPearson`, `TestCalibrationSet`,
+  `TestCalibrationResult` — pins r ≥ 0.6 and the gate-region trustworthiness).
+
+### [2026-05-31] [ACTIVE] Curated marker lists extend 3+ times — incompleteness is structural, not a bug
+
+- **Finding (B25).** The leading-Wikipedia-chrome marker list needed extending a
+  **third** time: person/sports (B9) → company/website (B18) → programming
+  language (B25, after a Rust run leaked the language infobox). Each extension
+  was triggered by a *new domain* of real research, not by a coding mistake.
+- **Rule (reinforces the [position + marker] entry below).** When the same
+  curated list (here `_WIKI_CHROME_MARKERS`; cf. `source_quality` allowlist)
+  needs extending on *every new content domain*, treat its incompleteness as
+  **structural, not a defect** — budget for "real usage will add markers" rather
+  than chasing completeness up front. The thing that keeps each extension *safe*
+  is the orthogonal gate (leading-position), not the list being exhaustive.
+- **Precision discipline that held again.** Only added keys **unique** to a
+  language infobox (`typing discipline`, `filename extension`); deliberately
+  excluded `paradigm` / `first appeared` / `stable release` because those are
+  exactly the *columns* of "Comparison of programming languages" tables — adding
+  them would risk stripping a legit leading comparison table. Same exclusion
+  logic as B18's `headquarters`/`founder`.
+- **Mechanism / tests:** `utils/cleaner.py::_WIKI_CHROME_MARKERS` +
+  `tests/test_extractor.py::TestLeadingWikiChrome`
+  (`test_strips_programming_language_infobox`,
+  `test_preserves_language_comparison_table`). Verified live: the real Rust
+  Wikipedia article now opens with prose, 0 infobox keys in the first 1500 chars.
+
+### [2026-05-31] [ACTIVE] If you hand-write the same orchestration scaffold N times, bake it into a command
+
+- **Finding.** Across the 2026-05 dogfooding runs (Sam Altman, Meta LLM, Mitoma,
+  DuckDuckGo, 辺地共聴, Silicon Valley, Rust) the agent re-authored the *same*
+  throwaway `.scratch_*.py` six times: multi-search → triage by `source_tier` →
+  drop `near_duplicate` → dedup by host → read top N → print snippets. Identical
+  plumbing every time. That per-task scaffolding is a recurring tax on the
+  maintaining agent, and re-writing it by hand also re-introduces small bugs.
+- **Rule.** **Reducing the agent's own per-task plumbing is a first-class
+  usability win, not a side quest.** When you notice you've written substantially
+  the same orchestration code more than ~3 times, promote it to a reusable
+  command (`scripts/research.py "<topic>" [--region jp-jp] [--recent] [--read N]`)
+  whose docstring is the API. The command must *only orchestrate existing tools*
+  (search_web / read_article / suggest_queries + the noise auditor) — no new
+  retrieval logic — so it can't drift from the real pipeline. Extract the one
+  non-trivial pure function (`triage`) and unit-test it; leave the network I/O
+  to the tools that already have coverage.
+- **Guard.** The win is "less typing for the agent," not "more abstraction." If
+  the scaffold isn't actually repeated, don't build the command — premature
+  tooling is the same anti-pattern as premature optimization.
+- **Mechanism / tests:** `scripts/research.py` (`triage` pure fn + thin async
+  `run`) + `tests/test_scripts.py::TestResearchTriage` (authoritative-first,
+  near-dup skip, one-per-host, capped-at-read_n). Import-smoke only for `run`
+  (it hits the network). Surfaced B25 on first real use (Rust Wikipedia infobox
+  chrome leak), proving the command also doubles as a dogfooding harness.
+
+### [2026-05-31] [ACTIVE] Document the capabilities the agent can't discover — the docstring is the API
+
+- **Finding (B23).** A "non-AI Silicon Valley trends" run stalled because the
+  agent didn't know DuckDuckGo's `-term` exclusion (and `site:`/`"phrase"`/`OR`)
+  passed straight through `search_web`. The capability *existed and worked* —
+  it was simply never written in the tool's docstring, which (per CLAUDE.md) is
+  the agent's only "API reference".
+- **Rule.** **An undocumented capability does not exist to the agent.** A tool's
+  docstring is its API: if the agent can't see a feature there, it won't use it,
+  no matter how well it works. When you find yourself surprised an agent didn't
+  use a supported affordance, the bug is usually missing docs, not missing code.
+  (Pure-docstring fixes still need a regression test — here, that the operators
+  reach the backend verbatim — so the documented contract can't silently rot.)
+- **Mechanism / tests:** `tools/search.py` docstring + `tests/test_search.py`
+  (`test_search_operators_pass_through_verbatim`, `test_operators_survive_url_encoding`).
+
 ### [2026-05-30] [ACTIVE] The stack was UTF-8/English-centric — non-English usage broke 3 things
 
 - **One Japanese research run ("片地/辺地共聴", government policy) exposed three
@@ -77,8 +321,12 @@ Each entry carries one status tag:
   2. **Source tier (B21, fixed).** `.go.jp` / `.lg.jp` (Japanese government)
      tagged `unknown` — the `_AUTH_TLDS` allowlist was `.gov`/`.gov.uk` only.
      Extended to JP/FR/DE/EU/IN/KR/… gov + academic TLDs.
-  3. **Dedup (B22, open).** `_title_tokens` uses `[a-z0-9]+`, so Japanese
-     titles tokenize to ~nothing → `near_duplicate` silently no-ops on CJK.
+  3. **Dedup (B22, fixed).** `_title_tokens` used `[a-z0-9]+`, so Japanese
+     titles tokenized to ~nothing → `near_duplicate` silently no-op on CJK.
+     Now emits CJK character bigrams.
+- **All three closed (2026-05-30).** One Japanese run → three fixes (B20/B21/B22).
+  Each was a latent "works in English/UTF-8 only" assumption; none had an error
+  message — they failed *silently* (garbage text, `unknown` tags, no-op dedup).
 - **Rule.** **"Works" usually means "works in English/UTF-8".** Charset,
   trusted-domain lists, and tokenizers all encode a default locale. Real
   non-English usage is the only thing that surfaces these — and a *primary
@@ -188,6 +436,14 @@ Each entry carries one status tag:
   `unknown` (≠ bad). **When you can identify the good with precision but not the
   bad, label only the good — don't fabricate a negative verdict you can't
   defend.** (`core/source_quality.py`.)
+- **Follow-ups (B21 2026-05-30, B24 2026-05-31).** The allowlist is *expected*
+  to grow from real usage: B21 added national-gov TLDs (`.go.jp`…) after a
+  Japanese run; B24 added analyst/research firms (Gartner, Deloitte, Crunchbase,
+  IEEE CS…). A sharper precision rule emerged in B24: **a domain that runs a
+  per-author contributor network (Forbes, Inc.) cannot be certified by its
+  domain** — trust attaches to the author, not the host, so such domains stay
+  `unknown` even though they're "famous". Domain-level trust requires
+  domain-level editorial control.
 
 ### [2026-05-30] [ACTIVE] Search resilience — bypass the library when it has a single backend
 

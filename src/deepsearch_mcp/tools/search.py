@@ -76,6 +76,15 @@ async def search_web(
 
     ## PARAMETERS
     - `query`: Keywords only (not full sentences). Max 500 chars.
+      DuckDuckGo search operators are passed through verbatim — use them:
+        • `-term`  exclude a word: `electric cars -tesla`
+        • `"..."`  exact phrase: `"model context protocol"`
+        • `site:`  restrict to a domain: `RAG site:arxiv.org`
+        • `OR`     either term: `llama OR mistral benchmarks`
+      To answer a "NOT about X" / "X以外" request, exclude with `-X`
+      (e.g. `Silicon Valley trends 2026 -AI -"artificial intelligence"`).
+      ⚠️ Excluding a *dominant* topic surfaces long-tail / low-relevance pages
+      (events, directories); expect to mine the remaining substantive results.
     - `region`: Country code like 'us-en', 'jp-jp', 'wt-wt' (global default).
     - `timelimit`: 'd'=last day, 'w'=week, 'm'=month, 'y'=year. None=all time.
     - `max_results`: 1–50. Default 10. Use lower values for targeted queries.
@@ -263,10 +272,31 @@ _STOPWORDS = frozenset(
 )
 
 
+# CJK runs (kana + kanji). Japanese has no word spaces, so we can't word-split
+# without a morphological analyzer (won't add that dep). Instead we emit
+# character *bigrams* for CJK runs — a standard dependency-free way to get
+# meaningful partial-overlap similarity. (B22, 2026-05-30: the ASCII-only
+# tokenizer made `near_duplicate` a silent no-op for Japanese titles.)
+_CJK_RE = re.compile(r"[぀-ヿ㐀-䶿一-鿿々〆ヵヶ]+")
+
+
 def _title_tokens(title: str) -> frozenset[str]:
-    """Significant lowercase tokens of a title (≥3 chars, no stopwords)."""
-    words = re.findall(r"[a-z0-9]+", (title or "").lower())
-    return frozenset(w for w in words if len(w) >= 3 and w not in _STOPWORDS)
+    """Significant tokens of a title for near-duplicate comparison.
+
+    - Latin/digit words: ≥3 chars, stopwords dropped (unchanged English behavior).
+    - CJK runs: character bigrams (so Japanese/Chinese titles compare meaningfully).
+    """
+    t = (title or "").lower()
+    tokens: set[str] = set()
+    for w in re.findall(r"[a-z0-9]+", t):
+        if len(w) >= 3 and w not in _STOPWORDS:
+            tokens.add(w)
+    for run in _CJK_RE.findall(t):
+        if len(run) == 1:
+            tokens.add(run)
+        else:
+            tokens.update(run[i:i + 2] for i in range(len(run) - 1))
+    return frozenset(tokens)
 
 
 def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:

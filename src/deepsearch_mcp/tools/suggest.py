@@ -38,15 +38,32 @@ _AC_TIMEOUT = 5  # Fast endpoint; fail quickly and fall back to templates
 #
 # Order matters: temporal freshness is ranked early because most real research
 # tasks are time-bounded (Persona A FRICTION-C3).
-_VIEWPOINT_TEMPLATES = [
-    "{topic} 2025 OR 2026",
-    "{topic} criticism",
+# RESERVED templates are the echo-chamber differentiators that MUST survive the
+# 8-result cap, even when live autocomplete returns a full set of (often noisy)
+# phrases — for a person, real autocomplete is tabloid noise like "net worth /
+# husband / age" (Sam Altman run, 2026-05-30). B11: guarantee that ≥1 criticism
+# AND ≥1 primary-source angle always reach the agent, since that is the tool's
+# actual mission (breaking echo chambers), not surfacing popular queries.
+_RESERVED_TEMPLATES = [
+    "{topic} 2025 OR 2026",       # temporal freshness (most research is time-bound)
+    "{topic} criticism",          # criticism angle (guaranteed)
+    "{topic} alternatives",       # alternative viewpoints
+    "{topic} site:github.com",    # primary source (guaranteed)
+]
+# EXTRA templates fill any slots left after reserved + a capped share of
+# autocomplete + context entities. Dropped first when the cap is tight.
+_EXTRA_TEMPLATES = [
     "{topic} problems limitations",
-    "{topic} alternatives",
     "{topic} vs",
-    "{topic} site:github.com",
     "{topic} site:arxiv.org OR site:research.google.com",
 ]
+# Full set, reserved first (kept for back-compat / _build_template_queries).
+_VIEWPOINT_TEMPLATES = _RESERVED_TEMPLATES + _EXTRA_TEMPLATES
+
+# Autocomplete is enrichment, not the mission: cap its share so it cannot crowd
+# the reserved templates out of the 8-result window (B11).
+_AC_BUDGET = 3
+_MAX_RESULTS = 8
 
 # Word count above which quote-wrapping causes empty result sets
 _QUOTE_WORD_LIMIT = 2
@@ -89,12 +106,17 @@ async def suggest_queries(
       "Stanford" in snippets yields a `"Stanford" <topic>` query).
 
     ## RETURNS
-    JSON array of 3–8 query strings, ordered by lateral-thinking value:
-    1. DDG autocomplete (real user search patterns), if available
-    2. Temporal-freshness ("2025 OR 2026") — first because most research is time-bound
-    3. Criticism / problems / alternatives — break echo chambers
-    4. Primary-source angles (`site:github.com`, `site:arxiv.org`)
-    5. Entity drill-downs from context
+    JSON array of 3–8 query strings. Live autocomplete is **capped** so it can
+    never crowd out the echo-chamber differentiators — for a person, real
+    autocomplete is often tabloid noise ("net worth", "husband"). The output
+    always reserves slots for ≥1 criticism and ≥1 primary-source angle:
+    1. DDG autocomplete (real user patterns), if available — capped to the top 3
+    2. Temporal-freshness ("2025 OR 2026") — first template because most research is time-bound
+    3. Criticism angle — **always present** (breaks echo chambers)
+    4. Alternatives angle
+    5. Primary-source `site:github.com` — **always present**
+    6. Entity drill-downs from context, then overflow templates (`problems
+       limitations`, `vs`, `site:arxiv.org`) and any leftover autocomplete
 
     ## EXAMPLES (Few-Shot)
 
@@ -123,7 +145,8 @@ async def suggest_queries(
 
     # Run autocomplete and template generation concurrently
     ac_task = asyncio.create_task(_fetch_autocomplete(topic))
-    template_queries = _build_template_queries(topic)
+    reserved_queries = _build_template_queries(topic, _RESERVED_TEMPLATES)
+    extra_queries = _build_template_queries(topic, _EXTRA_TEMPLATES)
 
     ac_suggestions = await ac_task
 
@@ -145,20 +168,29 @@ async def suggest_queries(
             seen.add(normalized)
             combined.append(q.strip())
 
-    # AC suggestions (high quality — real user patterns)
-    for q in ac_suggestions:
+    # 1. Autocomplete — real user patterns, but CAPPED (B11): a full set of AC
+    #    phrases must not crowd the reserved differentiator templates out of the
+    #    8-result window. AC stays first (it can surface useful sub-topics), but
+    #    only its top _AC_BUDGET; the rest is overflow.
+    for q in ac_suggestions[:_AC_BUDGET]:
         _add(q)
 
-    # Viewpoint templates (always included for research depth)
-    for q in template_queries:
+    # 2. Reserved viewpoint templates — GUARANTEED to survive the cap, because
+    #    capped-AC (≤3) + reserved (4) ≤ 7 < _MAX_RESULTS. This is what keeps
+    #    ≥1 criticism + ≥1 primary-source angle reaching the agent.
+    for q in reserved_queries:
         _add(q)
 
-    # Entity-based queries from context
+    # 3. Entity drill-downs from context.
     for q in entity_queries:
         _add(q)
 
+    # 4. Fill any remaining slots: extra templates first, then leftover AC.
+    for q in extra_queries + ac_suggestions[_AC_BUDGET:]:
+        _add(q)
+
     # Return 3–8 results
-    output = combined[:8] if len(combined) >= 3 else combined
+    output = combined[:_MAX_RESULTS] if len(combined) >= 3 else combined
     if len(output) < 3:
         # Ensure minimum 3 by adding basic templates even if duplicates
         for q in [f"{topic} tutorial", f"{topic} examples", f"{topic} documentation"]:
@@ -223,10 +255,16 @@ def _render_topic(topic: str) -> str:
     return clean
 
 
-def _build_template_queries(topic: str) -> list[str]:
-    """Build viewpoint-shifting queries from the topic string."""
+def _build_template_queries(
+    topic: str, templates: list[str] | None = None
+) -> list[str]:
+    """Build viewpoint-shifting queries from the topic string.
+
+    `templates` defaults to the full viewpoint set; callers pass
+    `_RESERVED_TEMPLATES` / `_EXTRA_TEMPLATES` to render each tier separately.
+    """
     rendered = _render_topic(topic)
-    return [template.format(topic=rendered) for template in _VIEWPOINT_TEMPLATES]
+    return [t.format(topic=rendered) for t in (templates or _VIEWPOINT_TEMPLATES)]
 
 
 def _extract_entities(context: str) -> list[str]:

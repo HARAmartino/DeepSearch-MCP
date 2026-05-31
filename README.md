@@ -345,9 +345,10 @@ DeepSearch-MCP/
 │       └── date_parser.py  # ISO 8601 normalization + URL/body fallback
 ├── scripts/                # status.py · verify.py · docs_map.py ·
 │                           # collect_telemetry.py · live_check.py ·
-│                           # propose_noise_regex.py
+│                           # propose_noise_regex.py · research.py
 ├── evals/
 │   ├── eval_judge.py             # Quality scorer (0–10, 3 axes)
+│   ├── calibrate_judge.py        # B1: judge-vs-consumer correlation check
 │   ├── simulate_research.py      # E2E ReAct loop simulation
 │   ├── analyze_telemetry.py      # Day 2 ops: usage analysis + alerts
 │   ├── dogfood_research.py       # real-tool research harness + noise audit

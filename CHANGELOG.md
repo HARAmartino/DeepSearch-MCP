@@ -133,6 +133,145 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Changed — suggest_queries reserves slots for echo-chamber angles (2026-05-31, B11)
+- `suggest_queries` now **caps live autocomplete at 3 phrases** and reserves the
+  8-result window for its viewpoint-shifting differentiators. The reserved tier
+  (`{topic} 2025 OR 2026`, `criticism`, `alternatives`, `site:github.com`) is
+  guaranteed to survive — so **≥1 criticism and ≥1 primary-source query always
+  reach the agent**, even when autocomplete returns a full set of (often noisy)
+  phrases. Previously, 4 autocomplete phrases pushed both `site:github` and
+  `site:arxiv` past the cap, gutting the tool's echo-chamber-breaking mission
+  (real autocomplete for a person is tabloid noise: "net worth", "husband").
+- Autocomplete still leads the list when present (unchanged ordering contract).
+- Tests: `tests/test_suggest.py::TestReservedSlotsB11`.
+
+### Fixed — Intermittent test-teardown warning silenced (2026-05-31, B8)
+- `tests/test_telemetry.py` gained an autouse fixture that awaits
+  `telemetry.drain()` in teardown, so the `@track` decorator's fire-and-forget
+  aiosqlite write can never race the event-loop teardown into an intermittent
+  `PytestUnhandledThreadExceptionWarning`. Test-only change; no runtime behavior
+  change. Pinned by `TestDrainSafety::test_drain_clears_a_pending_write`.
+
+### Added — Extraction gauntlet expanded 5 → 10 site categories (2026-05-31, B3)
+- The `eval_judge` extraction gauntlet (`tests/test_extractor.py`) now covers
+  **10** site categories instead of 5: added forum Q&A (Stack Overflow), academic
+  preprint (arXiv), government policy notice, corporate press release, and
+  e-commerce product — each with realistic 2026-era chrome (vote rails, cite
+  boxes, datelines, add-to-cart, "customers also bought"). Widens the regression
+  net to far more of the web an agent actually reads.
+- Gauntlet average holds at **8.72/10 ≥ 8.5 gate**; every category clears the
+  7.0 per-category floor. (Internal test-corpus change; no runtime behavior
+  change.)
+
+### Added — MTTI (mean time to improvement) metric in status.py (2026-05-31, B2)
+- `scripts/status.py` now prints an **MTTI** line derived from the backlog
+  (`docs/METHODOLOGY.md` §5), the project's real alert→patch ledger. A reactive
+  row carries `disc:YYYY-MM-DD` (flagged) and, once closed, `DONE YYYY-MM-DD`
+  (patched); MTTI = mean/median of `DONE − disc` over closed reactive rows, plus
+  the age of the oldest still-open flag. Proactive/process items (no `disc:`)
+  are excluded by design.
+- **Reframed off the literal backlog text** ("add `patch_landed_at` column to
+  `telemetry` schema"): a per-call telemetry event has no "patch", and alerts
+  are recomputed statelessly (never persisted), so there is nothing to attach a
+  landing time to. The backlog is the only continuous ledger that pairs a
+  discovery with a fix.
+- **Finding: MTTI ≈ 0 days** — this agent fixes flagged issues in the same
+  session, so the live, actionable signal is the **oldest open flag's age**
+  (currently 2d), not the closed average.
+- Tests: `tests/test_scripts.py::TestBacklogMTTI`.
+
+### Fixed — eval_judge no longer over-rates thin/empty extractions (2026-05-31, B26)
+- `eval_judge.score_markdown` previously awarded the full 4/4 noise score to any
+  body that merely lacked noise patterns — so a near-empty failed extraction
+  (`"# Title / Loading…"`) scored a misleading **5.0/10**. Added a
+  content-sufficiency gate: the noise reward is now scaled by
+  `min(1, len(body)/150)`, so "absence of noise" can't read as "clean" when
+  there is no content to judge.
+- **Effect (measured via `calibrate_judge.py`):** the thin fragment drops
+  **5.0 → 1.59** (consumer rating 1.0) and the judge↔consumer correlation rises
+  **r 0.79 → 0.932**. Real articles are unaffected (hundreds+ of chars ⇒ factor
+  1.0), so the ≥8.5 Gauntlet gate region is byte-identical — confirmed by the
+  golden fixtures and the code-heavy sample scoring exactly as before.
+- Tests: `tests/test_judge.py::TestThinContentGate`.
+
+### Added — eval_judge calibration harness (2026-05-31, B1)
+- `evals/calibrate_judge.py` measures the Pearson correlation between the cheap
+  `eval_judge` heuristic (noise/structure/density → 0–10) and the **consumer's**
+  holistic usability rating, over 11 labeled samples (the 4 real golden fixtures
+  as high anchors + 7 crafted real-world failure modes). Reframed off the
+  backlog's *human*-rating target: the consumer of `read_article` output is the
+  LLM agent, so that is the correct (and unblocked) ground truth.
+- **Result: r = 0.79, and the 8.5 Gauntlet gate region is well-calibrated** —
+  the golden fixtures score 8.5–9.25 vs. a consumer 8.5–9.0, so the gate
+  genuinely means "good". Surfaced a low-range miscalibration (a thin/empty
+  extraction scores 5.0 because the noise axis rewards *absence* of noise even
+  with no content) — recorded as backlog B26; the gate region itself is fine.
+- No change to runtime tool behavior or the gate; this validates the gate's
+  proxy. Tests: `tests/test_judge.py::TestPearson` / `TestCalibrationSet` /
+  `TestCalibrationResult`.
+
+### Fixed — Programming-language Wikipedia infoboxes stripped (2026-05-31, B25)
+- `read_article` now strips the leading Wikipedia **programming-language /
+  software infobox** (e.g. Rust's `Paradigms / Designed by / First appeared /
+  Stable release / Typing discipline / Filename extensions` table) instead of
+  leaking it into the article body. Surfaced by the first `scripts/research.py`
+  run (Rust). Added the two keys *unique* to a language infobox — `typing
+  discipline`, `filename extension` — to the position+marker chrome gate.
+- **Precision preserved:** deliberately did *not* add `paradigm` / `first
+  appeared` / `stable release`, since those are the column headers of
+  "Comparison of programming languages" tables; adding them would risk stripping
+  a legitimate leading comparison table (same caution as the B18 company keys).
+- Tests: `TestLeadingWikiChrome::test_strips_programming_language_infobox` and
+  `::test_preserves_language_comparison_table`. Verified live on the real Rust
+  article (now opens with prose, 0 infobox keys in the first 1500 chars).
+
+### Added — One-command research digest (2026-05-31): workload reduction
+- `scripts/research.py "<topic>"` runs the full Deep Research loop in one call:
+  multi-search → triage (authoritative-first, drop `near_duplicate`, dedup by
+  host) → read the top N → print a synthesis-ready digest (each source's tier,
+  title, snippet, and a residual-noise flag) + lateral query ideas. It only
+  orchestrates the existing tools — no new retrieval logic.
+- **Why:** the agent had hand-written the *same* throwaway orchestration script
+  six times across the 2026-05 dogfooding runs (`.scratch_meta.py`,
+  `.scratch_mitoma.py`, `.scratch_ddg.py`, `.scratch_kyocho.py`,
+  `.scratch_sv.py`, `.scratch_altman.py`). This replaces ~40 lines of
+  per-task plumbing with `python scripts/research.py "topic" [--recent] [--region jp-jp]`.
+- Tests: `tests/test_scripts.py::TestResearchTriage` (the pure triage logic).
+
+### Changed — Analyst / research sources recognized (2026-05-31, B24)
+- `source_tier` now tags major industry analyst / research / consulting domains
+  `authoritative`: Gartner, Forrester, IDC, Deloitte, McKinsey, BCG, PwC,
+  Accenture, IEEE Computer Society (computer.org), Crunchbase, HBR, Pew
+  Research. Motivated by the non-AI SV-trends run, where Deloitte / Crunchbase /
+  computer.org reports were indistinguishable from SEO blogs (all `unknown`).
+- **Deliberately excluded** `forbes.com` / `inc.com` / `entrepreneur.com`:
+  they run large *contributor* networks where quality is per-author, not
+  per-domain, so the domain can't certify the article (same precision principle
+  as refusing to guess `low_quality`). Tests pin both the inclusions and the
+  exclusions.
+
+### Added — Search-operator guidance (2026-05-31, B23)
+- `search_web` docstring (the agent's prompt) now documents that DuckDuckGo
+  operators pass through verbatim — `-term` (exclude), `"phrase"`, `site:`,
+  `OR` — with an explicit recipe for "NOT about X" / "X以外" requests
+  (`… -X -"X spelled out"`) and a caveat that excluding a *dominant* topic
+  surfaces long-tail / low-relevance pages. Motivated by a "non-AI Silicon
+  Valley trends" run where the agent didn't know `-AI` was supported.
+- Regression tests pin the contract: operators reach the DDGS call verbatim
+  (`test_search_operators_pass_through_verbatim`) and survive into the
+  fallback URL (`test_operators_survive_url_encoding`). No behavior change —
+  the operators always passed through; they were just undocumented.
+
+### Fixed — Near-duplicate detection for CJK titles (2026-05-30, B22)
+- `near_duplicate` (B16) was a silent no-op for Japanese/Chinese results:
+  `_title_tokens` used `[a-z0-9]+`, so a CJK title produced ~no tokens →
+  Jaccard always 0. Now CJK runs emit **character bigrams** (no morphological
+  analyzer / new dependency needed); Latin word-tokenization is unchanged.
+  Verified: the real 辺地共聴 subsidy listicles (repeated across 6+ aggregators)
+  now score J≈0.71 → flagged, while different Japanese topics score J≈0.27 →
+  kept. English behavior identical (EN dup 0.64, EN diff 0.0). Tests:
+  `tests/test_search.py::{TestTitleTokens,TestJapaneseNearDuplicate}`.
+
 ### Changed — Non-US/UK authoritative TLDs (2026-05-30, B21)
 - `core/source_quality.py` `_AUTH_TLDS` extended beyond `.gov`/`.gov.uk`/`.edu`
   to national government & academic TLDs: `.go.jp`/`.lg.jp` (Japan),
