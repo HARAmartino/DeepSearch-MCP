@@ -28,7 +28,12 @@ Each entry carries one status tag:
   to documentation just as much as to extraction output.
 
 **Audit cadence:** quarterly, or whenever a dependency bumps a major version.
-**Last audit:** 2026-05-29 (post-Dogfooding cycle).
+**Last audit:** 2026-06-01 (file grew to ~45 entries fast). Findings: one
+reference statement was actively stale — "`published_date` 常に None" was
+invalidated by B14 (URL-derived date), now corrected; one accuracy drift fixed
+(`run_in_executor` → `to_thread`); one resolved-run narrative (Sam Altman,
+B9/B11–B14 all closed) demoted ACTIVE→HISTORICAL. No `[STALE]` deletions — the
+rest are <1 week old and genuinely load-bearing. (Prev: 2026-05-29.)
 
 ---
 
@@ -61,7 +66,7 @@ Each entry carries one status tag:
 | 2026-05-30 | [ACTIVE] | [One TLS fingerprint is not enough — rotate on a block](#2026-05-30-active-one-tls-fingerprint-is-not-enough--rotate-on-a-block) |
 | 2026-05-30 | [ACTIVE] | [Real search returns what ranks, not what's authoritative](#2026-05-30-active-real-search-returns-what-ranks-not-whats-authoritative) |
 | 2026-05-30 | [ACTIVE] | [Search resilience — bypass the library when it has a single backend](#2026-05-30-active-search-resilience--bypass-the-library-when-it-has-a-single-backend) |
-| 2026-05-30 | [ACTIVE] | [Real research run (Sam Altman) — search is the loop's lifeline](#2026-05-30-active-real-research-run-sam-altman--search-is-the-loops-lifeline) |
+| 2026-05-30 | [HISTORICAL] | [Real research run (Sam Altman) — search is the loop's lifeline](#2026-05-30-historical-real-research-run-sam-altman--search-is-the-loops-lifeline) |
 | 2026-05-30 | [ACTIVE] | [A mock of the unit-under-test hid a feature that never worked](#2026-05-30-active-a-mock-of-the-unit-under-test-hid-a-feature-that-never-worked) |
 | 2026-05-30 | [ACTIVE] | [Fixtures are not real usage — the Check was self-referential](#2026-05-30-active-fixtures-are-not-real-usage--the-check-was-self-referential) |
 | 2026-05-30 | [ACTIVE] | [Aggregate activation — "no data" is not "healthy"](#2026-05-30-active-aggregate-activation--no-data-is-not-healthy) |
@@ -736,8 +741,13 @@ Each entry carries one status tag:
   `tests/test_search.py::{TestDdgHtmlFallback,TestSearchWebFallbackWiring,TestDecodeDdgHref}`,
   `tests/conftest.py` (cache isolation).
 
-### [2026-05-30] [ACTIVE] Real research run (Sam Altman) — search is the loop's lifeline
+### [2026-05-30] [HISTORICAL] Real research run (Sam Altman) — search is the loop's lifeline
 
+- **Status note (2026-06-01 audit):** [HISTORICAL] — every pain point this run
+  recorded (B9, B11, B12, B13, B14) is now **closed**, and the durable principle
+  ("search is the workflow's single point of failure") lives on in the ACTIVE
+  *Search resilience* (B12) entry. Kept as the originating run narrative; the
+  "always null" line below was true *then* (B14 since derives a URL date).
 - **Task.** "Investigate Sam Altman's recent schedule." A genuine end-to-end
   research use, run through the real tools.
 - **Outcome: blocked, honestly.** `search_web` failed (CONN_ERROR — bing
@@ -1064,7 +1074,7 @@ Each entry carries one status tag:
 
 ### [2026-05-28] [ACTIVE] duckduckgo-search v8 — 追加の重要な制約（Phase 2 判明）
 - **結果dictキーは `href`（`url` ではない）:** `DDGS.text()` の結果は `title`, `href`, `body` キーを持つ。SPEC.md の `SearchResult.url` にマッピングする際は `r.get("href", "")` を使うこと。
-- **`published_date` は常に None:** html/lite/bing いずれのバックエンドも日付を返さない。`SearchResult.published_date` は `None` を期待することをエージェントのプロンプトで明示すること。
+- **`published_date`（2026-06-01 監査で更新 — B14）:** DDGS バックエンド（html/lite/bing）自体は日付を返さない。**ただし B14 以降、`search_web` は結果 URL のパス**（ニュースの `/YYYY/MM/DD/` 等）**から best-effort で `published_date` を導出する**。URL に日付が無ければ `None`（`None` ≠「古い」）。「常に None」という旧前提でエージェントのプロンプトを書かないこと。スニペット本文の日付は精度不足のため掘らない（B14 の意図的スコープ）。
 - **内部 HTTP クライアントは `primp` (Rust):** `curl_cffi` ではなく `primp` が使われており `impersonate="random"` がデフォルト。DDGS 自体がステルス対応済み。追加の curl_cffi ヘッダーは不要だが、`DDGS(headers={...})` で Accept-Language 等を上書きできる。
 - **パッケージ名変更警告:** `duckduckgo_search` → `ddgs` に改名中。`RuntimeWarning` を `warnings.filterwarnings("ignore", category=RuntimeWarning)` で抑制すること。
 - **Thread Safety:** `DDGS` インスタンスを共有してはならない。必ず呼び出しごとに新インスタンスを生成し、`asyncio.to_thread()` でスレッドに委譲すること。
@@ -1090,7 +1100,7 @@ Each entry carries one status tag:
 ### [2026-05-28] [ACTIVE] duckduckgo-search v8 — DDGS is Synchronous
 - **Rule:** `duckduckgo-search` v8.x の `DDGS.text()` は**同期メソッド**（asyncでない）。
 - **Impact:** SPEC.md の「全I/OはAsync」要件と衝突する。
-- **Solution:** `await asyncio.get_event_loop().run_in_executor(None, ddgs.text, ...)` でスレッドプールに委譲すること。`async def` 内で直接 `DDGS().text()` を呼ばないこと。
+- **Solution:** `await asyncio.to_thread(ddgs.text, ...)` でスレッドに委譲すること（現行コードはこの形。`run_in_executor` でも可だが `to_thread` が標準）。`async def` 内で直接 `DDGS().text()` を呼ばないこと。
 - **API Signature (v8.1.1):** `DDGS.text(keywords, region=None, safesearch='moderate', timelimit=None, backend='auto', max_results=None) -> list[dict[str, str]]`
 - **Constructor:** `DDGS(headers=None, proxy=None, timeout=10, verify=True)` — カスタムヘッダーはここで渡す。
 
