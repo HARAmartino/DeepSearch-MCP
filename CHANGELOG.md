@@ -133,6 +133,18 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Added — story_cluster corroboration signal on search results (2026-06-01, B19)
+- New `SearchResult.story_cluster` field: an integer id grouping results that
+  report the **same story across different outlets**. It links paraphrased
+  headlines that share ≥2 significant title tokens (e.g. the DuckDuckGo +30%
+  installs story that ran across 8 outlets with varied headlines), which the
+  stricter `near_duplicate` (title-Jaccard ≥ 0.6) misses.
+- **Deliberately a corroboration signal, not a skip flag:** unlike
+  `near_duplicate`, same-cluster results are worth reading across — the id tells
+  the agent they corroborate one event and are *not* N independent sources. A
+  loose false grouping is therefore low-harm. `near_duplicate` is unchanged.
+- Tests: `tests/test_search.py::TestB19StoryClusters`.
+
 ### Added — search_web freshness signal via URL-derived published_date (2026-06-01, B14)
 - `search_web` results now carry a best-effort `published_date` **derived from
   the result URL path** (news URLs embed `/YYYY/MM/DD/`), instead of always

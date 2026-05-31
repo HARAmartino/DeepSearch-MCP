@@ -28,6 +28,16 @@ class SearchResult(BaseModel):
         "primary (False). Skip RE-READING near-duplicates, but their COUNT is "
         "useful corroboration — they are kept, not removed.",
     )
+    story_cluster: int | None = Field(
+        default=None,
+        description="Integer id grouping results that report the SAME STORY "
+        "across outlets — looser than near_duplicate (it links paraphrased "
+        "headlines sharing key entities, e.g. 'DuckDuckGo'+'Google'). Same id = "
+        "same event: they CORROBORATE each other but are NOT independent "
+        "sources, so read 1–2 per cluster and don't count N same-cluster hits "
+        "as N confirmations. Unlike near_duplicate, these are worth reading "
+        "ACROSS. null = no cluster detected.",
+    )
 
 
 class ArticleMetadata(BaseModel):

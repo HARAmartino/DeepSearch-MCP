@@ -36,6 +36,7 @@ Each entry carries one status tag:
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [Match the signal's mechanism to its meaning — "skip" vs "corroborate" are opposite affordances](#2026-06-01-active-match-the-signals-mechanism-to-its-meaning--skip-vs-corroborate-are-opposite-affordances) |
 | 2026-06-01 | [ACTIVE] | [Derive a missing signal from the highest-precision source you have, not every source](#2026-06-01-active-derive-a-missing-signal-from-the-highest-precision-source-you-have-not-every-source) |
 | 2026-05-31 | [ACTIVE] | [An error hint must scale with evidence — a recovery action futile at scale shouldn't be the advice](#2026-05-31-active-an-error-hint-must-scale-with-evidence--a-recovery-action-futile-at-scale-shouldnt-be-the-advice) |
 | 2026-05-31 | [ACTIVE] | [Enrichment must not crowd out the differentiator — cap the optional input, reserve slots for the mission](#2026-05-31-active-enrichment-must-not-crowd-out-the-differentiator--cap-the-optional-input-reserve-slots-for-the-mission) |
@@ -75,6 +76,35 @@ Each entry carries one status tag:
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] Match the signal's mechanism to its meaning — "skip" vs "corroborate" are opposite affordances
+
+- **Context (B19).** B19 was filed as "B16 misses loose same-story clusters —
+  flag them too." The obvious reading: extend `near_duplicate` to looser
+  matches. But `near_duplicate` means **"don't re-read this"** — and a loose
+  same-story cluster from *independent outlets* is exactly what you DO want to
+  read across (it corroborates the event). Routing loose clusters into a skip
+  flag would have destroyed the corroboration value B19's own "expected impact"
+  line asked to *surface*.
+- **Rule.** **Before reusing an existing flag for a new case, check that its
+  *affordance* (what it makes the agent do) matches the new case's intent.** The
+  same underlying detection (similar titles) can warrant opposite actions: a
+  near-identical reprint → skip; a paraphrased same-story from another outlet →
+  read for corroboration but discount independence. So B19 got a *separate*
+  signal — `story_cluster` (a group id), not another `near_duplicate=true`.
+- **Precision risk scales with the affordance.** Because `story_cluster` says
+  "read across, just don't double-count," a false grouping is **low-harm** (the
+  agent still reads them). That let me use a looser threshold (≥2 shared
+  significant tokens) than `near_duplicate`'s strict Jaccard ≥ 0.6 — a looseness
+  that would be unacceptable for a skip flag. Pick the threshold for the cost of
+  being wrong, which depends on the affordance.
+- **Offline-validation caveat.** The ≥2-token threshold was tuned on synthetic
+  paraphrase sets (the real 8-outlet example isn't captured) — per the
+  "fixtures aren't real usage" lesson, treat the precision as provisional and
+  re-check `story_cluster` groupings during live dogfooding.
+- **Mechanism / tests:** `core/models.py` (`story_cluster` field) +
+  `tools/search.py` (`_mark_story_clusters`, `_STORY_MIN_SHARED`, union-find) +
+  `tests/test_search.py::TestB19StoryClusters`.
 
 ### [2026-06-01] [ACTIVE] Derive a missing signal from the highest-precision source you have, not every source
 

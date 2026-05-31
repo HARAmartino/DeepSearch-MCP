@@ -144,8 +144,13 @@ Parameters:
   timelimit    'd'=day, 'w'=week, 'm'=month, 'y'=year. None=all time.
   max_results  1–50. Default 10.
 
-Returns: JSON array of {title, url, body, published_date, score}
+Returns: JSON array of {title, url, body, published_date, score,
+                        source_tier, near_duplicate, story_cluster}
 ```
+
+`source_tier` flags curated-trusted domains; `near_duplicate` flags a near-identical
+earlier result (skip re-reading); `story_cluster` is an id grouping the *same story*
+across outlets (a corroboration signal — read 1–2 per cluster, count them as one source).
 
 `published_date` is a best-effort freshness signal **derived from the result URL**
 (news URLs embed the date, e.g. `/2026/05/28/`); it is `null` when the URL carries

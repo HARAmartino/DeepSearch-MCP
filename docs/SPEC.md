@@ -106,8 +106,15 @@ class SearchResult(BaseModel):
     title: str
     url: str
     body: str = Field(description="Snippet/Summary")
-    published_date: Optional[str] = Field(default=None, description="ISO 8601 format (YYYY-MM-DD)")
+    published_date: Optional[str] = Field(default=None,
+        description="ISO 8601 (YYYY-MM-DD), best-effort from the URL path (B14); null if none")
     score: Optional[float] = Field(default=None, description="Relevance score if available")
+    source_tier: str = Field(default="unknown",
+        description="'authoritative' or 'unknown' (B15)")
+    near_duplicate: bool = Field(default=False,
+        description="True if title near-matches an earlier result; skip re-reading (B16)")
+    story_cluster: Optional[int] = Field(default=None,
+        description="Same-story group id across outlets — corroboration signal, not skip (B19)")
 
 class ArticleMetadata(BaseModel):
     title: str

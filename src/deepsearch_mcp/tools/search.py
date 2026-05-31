@@ -139,6 +139,12 @@ async def search_web(
       (same story). **Don't re-read near-duplicates** — but their count is
       useful corroboration. The primary copy (false) prefers an authoritative
       source. Results are never removed, only flagged.
+    - `story_cluster`: integer id (or null) grouping results that report the
+      **same story across different outlets** — looser than `near_duplicate`,
+      it links paraphrased headlines sharing key entities. Same id ⇒ same event:
+      **read 1–2 per cluster for corroboration, but treat them as one source**
+      (don't count N same-cluster hits as N independent confirmations). Unlike
+      near-duplicates these ARE worth reading across.
 
     ## CONSTRAINTS
     - Results are cached for 24 hours. Repeated identical queries are free.
@@ -224,8 +230,9 @@ async def search_web(
     # outage; clear the failure streak (B13).
     _note_search_outcome(failed=False)
 
-    # Flag near-duplicate titles (B16) — applies to both DDGS and fallback paths.
+    # Flag near-duplicate titles (B16) + loose same-story clusters (B19).
     results = _mark_near_duplicates(results)
+    results = _mark_story_clusters(results)
 
     output = json.dumps(results, ensure_ascii=False, indent=None)
 
@@ -383,6 +390,56 @@ def _mark_near_duplicates(results: list[dict]) -> list[dict]:
             match["primary_idx"] = i
         else:
             r["near_duplicate"] = True
+    return results
+
+
+# Loose same-story clustering (B19). near_duplicate (Jaccard ≥ 0.6) catches
+# near-identical titles, but different outlets paraphrase the SAME story so
+# heavily that their headlines share only the key entities (e.g. the DuckDuckGo
+# +30%-installs story ran across 8 outlets, none flagged). We link results that
+# share ≥ _STORY_MIN_SHARED *significant* title tokens and surface the group as
+# a CORROBORATION signal (story_cluster id), NOT a skip flag — same-story
+# coverage from independent outlets is worth reading across; the id just tells
+# the agent they aren't independent confirmations. A loose false grouping is
+# therefore low-harm (the agent still reads them).
+_STORY_MIN_SHARED = 2
+
+
+def _mark_story_clusters(results: list[dict]) -> list[dict]:
+    """Assign a `story_cluster` id to groups of ≥2 results that likely report
+    the same story (≥ _STORY_MIN_SHARED shared significant title tokens,
+    transitively unioned). Singletons keep story_cluster=None."""
+    n = len(results)
+    toks = [_title_tokens(r.get("title", "")) for r in results]
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)  # keep the lower index as root
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if len(toks[i] & toks[j]) >= _STORY_MIN_SHARED:
+                union(i, j)
+
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+
+    cid = 0
+    for root in sorted(groups):  # root == min member index → stable, ordered ids
+        members = groups[root]
+        if len(members) >= 2:
+            cid += 1
+            for m in members:
+                results[m]["story_cluster"] = cid
     return results
 
 

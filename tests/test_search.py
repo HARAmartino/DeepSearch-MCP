@@ -952,3 +952,78 @@ class TestB14FreshnessSignal:
         ]
         data = json.loads(await search_web(query="b14 body"))
         assert data[0]["published_date"] is None
+
+
+class TestB19StoryClusters:
+    """B19: loose same-story clustering. Different outlets paraphrase one event
+    so heavily that title-Jaccard (<0.6) misses it; we group on shared key
+    entities and surface a `story_cluster` id as a corroboration signal."""
+
+    def _cluster(self, titles):
+        from src.deepsearch_mcp.tools.search import _mark_story_clusters
+        rows = [{"title": t, "source_tier": "unknown", "near_duplicate": False,
+                 "story_cluster": None} for t in titles]
+        return _mark_story_clusters(rows)
+
+    def test_paraphrased_headlines_share_a_cluster(self):
+        # The DuckDuckGo-installs story across 3 outlets: headlines differ a lot
+        # (Jaccard < 0.6) but all share the entities DuckDuckGo + Google.
+        rows = self._cluster([
+            "DuckDuckGo installs surge 30% after Google AI backlash",
+            "Privacy browser DuckDuckGo sees download spike following Google rollout",
+            "Why DuckDuckGo downloads jumped after Google's AI rollout",
+        ])
+        cids = [r["story_cluster"] for r in rows]
+        assert cids[0] is not None
+        assert cids[0] == cids[1] == cids[2], f"expected one cluster, got {cids}"
+
+    def test_jaccard_would_miss_these(self):
+        # Prove the premise: the same paraphrased pair is NOT a near_duplicate.
+        a = _title_tokens("DuckDuckGo installs surge 30% after Google AI backlash")
+        b = _title_tokens("Privacy browser DuckDuckGo sees download spike following Google rollout")
+        assert _jaccard(a, b) < 0.6
+        assert len(a & b) >= _OUTAGE_THRESHOLD - 1  # share >=2 significant tokens
+
+    def test_different_stories_same_topic_not_clustered(self):
+        # Both mention Google but are DIFFERENT stories (share only "google").
+        rows = self._cluster([
+            "DuckDuckGo installs surge after Google AI backlash",
+            "Google launches Gemini 3 flagship model",
+            "Apple unveils new iPhone at fall hardware event",
+        ])
+        cids = [r["story_cluster"] for r in rows]
+        assert cids == [None, None, None], f"over-clustered distinct stories: {cids}"
+
+    def test_singletons_get_none(self):
+        rows = self._cluster(["A totally unique headline about quantum widgets"])
+        assert rows[0]["story_cluster"] is None
+
+    def test_cluster_ids_are_stable_and_ordered(self):
+        # Two separate clusters → ids 1 and 2 by first appearance.
+        rows = self._cluster([
+            "Mars rover Perseverance finds organic molecules sample",   # c1
+            "Senate passes sweeping climate spending budget bill",       # c2
+            "Perseverance rover sample shows ancient organic molecules", # c1
+            "Climate budget bill clears Senate in late-night spending vote",  # c2
+        ])
+        cids = [r["story_cluster"] for r in rows]
+        assert cids[0] == cids[2] == 1
+        assert cids[1] == cids[3] == 2
+
+    @pytest.fixture
+    async def _clear(self):
+        await _clear_cache("b19 integ")
+        yield
+        await _clear_cache("b19 integ")
+
+    @patch("asyncio.to_thread", new_callable=AsyncMock)
+    async def test_search_web_populates_story_cluster(self, mock_thread, _clear):
+        mock_thread.return_value = [
+            {"title": "DuckDuckGo installs surge after Google AI backlash",
+             "href": "https://a.example/1", "body": "x"},
+            {"title": "DuckDuckGo download spike follows Google AI rollout",
+             "href": "https://b.example/2", "body": "x"},
+        ]
+        data = json.loads(await search_web(query="b19 integ"))
+        assert "story_cluster" in data[0]
+        assert data[0]["story_cluster"] == data[1]["story_cluster"] is not None
