@@ -133,6 +133,18 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Changed — suggest_queries primary source now covers medical & science (2026-06-01, B36)
+- The domain-adaptive primary-source angle (B29) now routes **medical** topics to
+  `site:pubmed.ncbi.nlm.nih.gov OR site:nih.gov OR site:who.int` and **science**
+  topics to `site:arxiv.org OR site:.edu`, instead of defaulting everything
+  non-policy to `site:github.com` (a medical run's angle had been a useless
+  `site:github`). Order is policy → medical → science → dev (first match wins);
+  science signal words are chosen to not overlap dev.
+- **Documented limit:** a topic that is only a proper-noun entity ("semaglutide
+  long-term effects" — no generic medical word) still defaults to dev; keyword
+  detection can't enumerate every drug/gene name (B25). Tests:
+  `tests/test_suggest.py::TestB36MedicalSciencePrimarySource`.
+
 ### Fixed — story_cluster no longer over-links Japanese titles on low-signal tokens (2026-06-01, B33)
 - `story_cluster` (B19/B28) used a flat "≥2 shared title tokens". For CJK that
   over-clustered: a character bigram is far lower-entropy than a Latin word, so

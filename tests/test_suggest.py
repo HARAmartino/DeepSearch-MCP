@@ -674,3 +674,51 @@ class TestB32LanguageAdaptiveTemplates:
         assert "批判" in combined          # criticism angle survived the AC cap
         assert "site:" in combined         # primary-source angle survived
         assert 3 <= len(data) <= 8
+
+
+class TestB36MedicalSciencePrimarySource:
+    """B36: the domain-adaptive primary-source angle (B29) extends to medical and
+    science topics — they have non-dev primaries (pubmed/nih, arxiv/.edu)."""
+
+    def test_template_routing(self):
+        from src.deepsearch_mcp.tools.suggest import (
+            _PRIMARY_SOURCE_DEV,
+            _PRIMARY_SOURCE_MEDICAL,
+            _PRIMARY_SOURCE_OFFICIAL,
+            _PRIMARY_SOURCE_SCIENCE,
+            _primary_source_template,
+        )
+        assert _primary_source_template("diabetes drug clinical trial") == _PRIMARY_SOURCE_MEDICAL
+        assert _primary_source_template("cancer vaccine efficacy") == _PRIMARY_SOURCE_MEDICAL
+        assert _primary_source_template("exoplanet atmosphere") == _PRIMARY_SOURCE_SCIENCE
+        assert _primary_source_template("quantum error correction") == _PRIMARY_SOURCE_SCIENCE
+        # B29 still holds; default still dev; React not misclassified.
+        assert _primary_source_template("EU AI Act") == _PRIMARY_SOURCE_OFFICIAL
+        assert _primary_source_template("React Server Components") == _PRIMARY_SOURCE_DEV
+
+    def test_policy_precedence_over_medical(self):
+        # "vaccine policy" → policy wins (gov sources), not medical.
+        from src.deepsearch_mcp.tools.suggest import (
+            _PRIMARY_SOURCE_OFFICIAL,
+            _primary_source_template,
+        )
+        assert _primary_source_template("vaccine policy mandate") == _PRIMARY_SOURCE_OFFICIAL
+
+    @patch("src.deepsearch_mcp.tools.suggest._fetch_autocomplete", new_callable=AsyncMock)
+    async def test_medical_topic_reaches_pubmed(self, mock_ac):
+        mock_ac.return_value = []
+        data = _parse_suggestions(await suggest_queries(topic="GLP-1 drug long-term safety"))
+        combined = " ".join(data).lower()
+        assert "pubmed" in combined or "nih.gov" in combined or "who.int" in combined, (
+            f"medical topic should reach a medical primary source: {data}"
+        )
+        assert "github" not in combined
+
+    def test_pure_drug_name_still_defaults_documented_limitation(self):
+        # Honest scope: a topic that is only a proper-noun entity (no generic
+        # medical word) is NOT detected — keyword detection's known limit (B25).
+        from src.deepsearch_mcp.tools.suggest import (
+            _PRIMARY_SOURCE_DEV,
+            _primary_source_template,
+        )
+        assert _primary_source_template("semaglutide long-term effects") == _PRIMARY_SOURCE_DEV

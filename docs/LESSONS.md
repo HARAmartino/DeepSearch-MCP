@@ -41,6 +41,7 @@ rest are <1 week old and genuinely load-bearing. (Prev: 2026-05-29.)
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [Keyword domain-detection is blind to bare-proper-noun topics — the entity IS the signal but is unlistable](#2026-06-01-active-keyword-domain-detection-is-blind-to-bare-proper-noun-topics--the-entity-is-the-signal-but-is-unlistable) |
 | 2026-06-01 | [ACTIVE] | [A metric's headroom is not a defect — a "calibration" change must improve agreement with ground truth, not the number](#2026-06-01-active-a-metrics-headroom-is-not-a-defect--a-calibration-change-must-improve-agreement-with-ground-truth-not-the-number) |
 | 2026-06-01 | [ACTIVE] | [Weight tokens by signal, not count — and a year/boilerplate token is not a story identifier](#2026-06-01-active-weight-tokens-by-signal-not-count--and-a-yearboilerplate-token-is-not-a-story-identifier) |
 | 2026-06-01 | [ACTIVE] | [A query-generating tool is language-blind by default — localize the WORDS, keep the operators](#2026-06-01-active-a-query-generating-tool-is-language-blind-by-default--localize-the-words-keep-the-operators) |
@@ -91,6 +92,28 @@ rest are <1 week old and genuinely load-bearing. (Prev: 2026-05-29.)
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] Keyword domain-detection is blind to bare-proper-noun topics — the entity IS the signal but is unlistable
+
+- **Context (B36).** Extended `_primary_source_template` (B29) to route medical
+  topics to pubmed/nih and science to arxiv. But the very topic that motivated it
+  — "semaglutide long-term effects" — is *not* detected: it has no generic
+  category word (disease/drug/trial), only a drug *name*. Keyword detection can't
+  enumerate every drug/gene/product name.
+- **Rule.** **Keyword classification works when the topic carries a category
+  word; it is structurally blind when the topic is a bare proper-noun entity
+  (the entity itself is the only signal, and the entity space is unbounded).**
+  Don't pretend a longer keyword list closes this — it can't. Accept the default
+  for undetected topics, *document the limit, and test it* (a passing test that
+  asserts "X defaults to dev" stops a future agent from thinking it's a bug).
+- **The honest scope is the catch.** B36 still helps the *common* phrasings
+  ("X drug trial", "vaccine safety", "cancer therapy"); it just can't help a bare
+  entity. The bigger fix for that (B35) is different in kind — react to the
+  *result set* (0 authoritative → nudge a `site:`-authority query) rather than to
+  the topic string. Know which problems a keyword list can and cannot solve.
+- **Mechanism / tests:** `tools/suggest.py` (`_MEDICAL_SIGNALS`/`_SCIENCE_SIGNALS`,
+  policy→medical→science→dev) + `tests/test_suggest.py::TestB36MedicalSciencePrimarySource`
+  (incl. `test_pure_drug_name_still_defaults_documented_limitation`).
 
 ### [2026-06-01] [ACTIVE] A metric's headroom is not a defect — a "calibration" change must improve agreement with ground truth, not the number
 

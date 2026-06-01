@@ -62,11 +62,33 @@ _RESERVED_BASE = [
 # usage, like the other allowlists; see the [STALE]-list discipline.)
 _PRIMARY_SOURCE_DEV = "{topic} site:github.com"
 _PRIMARY_SOURCE_OFFICIAL = "{topic} site:.gov OR site:europa.eu OR site:.int"
+# B36: medical / science topics also have non-dev primary sources. The
+# semaglutide run's primary-source angle was `site:github` (useless for a drug
+# topic). Detection is keyword-based, so a topic that is *only* a proper-noun
+# entity ("semaglutide long-term effects" — no generic medical word) still
+# defaults; common phrasings ("X drug trial", "vaccine safety", "cancer therapy")
+# are caught. Lists grow with usage (B25 discipline).
+_PRIMARY_SOURCE_MEDICAL = (
+    "{topic} site:pubmed.ncbi.nlm.nih.gov OR site:nih.gov OR site:who.int"
+)
+_PRIMARY_SOURCE_SCIENCE = "{topic} site:arxiv.org OR site:.edu"
 _POLICY_SIGNALS = frozenset(
     "law laws act regulation regulations regulatory policy directive treaty bill "
     "statute legislation legal court ruling sanctions tariff tax election gdpr "
     "compliance government ministry parliament senate congress antitrust "
     "constitution amendment".split()
+)
+_MEDICAL_SIGNALS = frozenset(
+    "disease drug drugs vaccine vaccines clinical symptom symptoms therapy "
+    "treatment treatments diagnosis dose dosage efficacy pharmaceutical "
+    "medication medications cancer infection epidemic pandemic fda "
+    "pubmed antibody antibiotic".split()
+)
+# Clearly-science words that do NOT overlap dev (no algorithm/neural/model/dataset).
+_SCIENCE_SIGNALS = frozenset(
+    "physics chemistry biology quantum genome genomics protein proteins enzyme "
+    "astronomy astrophysics exoplanet particle molecule molecular theorem "
+    "hypothesis neuron synapse".split()
 )
 
 # EXTRA templates fill any slots left after reserved + a capped share of
@@ -157,9 +179,10 @@ async def suggest_queries(
     2. Temporal-freshness ("2025 OR 2026") — first template because most research is time-bound
     3. Criticism angle — **always present** (breaks echo chambers)
     4. Alternatives angle
-    5. Primary-source angle — **always present**, and **domain-adaptive** (B29):
-       policy/legal/gov topics get official sources (`site:.gov OR site:europa.eu
-       OR site:.int`); everything else gets `site:github.com` (dev/code default)
+    5. Primary-source angle — **always present**, and **domain-adaptive** (B29/B36):
+       policy/legal/gov → official sources (`site:.gov`/`europa.eu`/`.int`);
+       medical → `pubmed`/`nih.gov`/`who.int`; science → `arxiv`/`.edu`;
+       everything else → `site:github.com` (dev/code default)
 
     The word-based angles (criticism / alternatives / problems / comparison) are
     **language-localized** (B32): a Japanese (CJK) topic gets 批判 / 代替案 /
@@ -306,12 +329,17 @@ def _render_topic(topic: str) -> str:
 
 
 def _primary_source_template(topic: str) -> str:
-    """B29: pick a domain-appropriate primary-source angle. Policy/legal/gov
-    topics → official sites (.gov / europa.eu / .int); everything else → the
-    dev/code default (GitHub). Word-level match so "React" doesn't trip "act"."""
+    """Pick a domain-appropriate primary-source angle (B29 + B36). Policy/legal/gov
+    → official sites; medical → pubmed/nih/who; science → arxiv/.edu; everything
+    else → the dev/code default (GitHub). Word-level match so "React" doesn't trip
+    "act". First match wins (policy → medical → science → dev)."""
     words = set(re.findall(r"[a-z]+", topic.lower()))
     if words & _POLICY_SIGNALS:
         return _PRIMARY_SOURCE_OFFICIAL
+    if words & _MEDICAL_SIGNALS:
+        return _PRIMARY_SOURCE_MEDICAL
+    if words & _SCIENCE_SIGNALS:
+        return _PRIMARY_SOURCE_SCIENCE
     return _PRIMARY_SOURCE_DEV
 
 
