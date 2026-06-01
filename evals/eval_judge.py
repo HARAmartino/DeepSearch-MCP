@@ -145,7 +145,12 @@ def score_markdown(text: str) -> JudgeScore:
         structure_score += 1.0
     elif has_header:
         structure_score += 0.5
-    # Bonus for multiple heading levels (well-sectioned document)
+    # Bonus for multiple heading levels (well-sectioned document).
+    # NB (B34, 2026-06-01): rewarding section *count/depth* here to lift the
+    # gauntlet (8.72→9.12) was tried and REVERTED — calibrate_judge showed it
+    # *lowered* judge↔consumer correlation (r 0.932→0.925) by trading 2
+    # under-ratings for 2 over-ratings. The headroom is honest signal, not a
+    # calibration defect; do not inflate it (Goodhart). See LESSONS 2026-06-01.
     if heading_levels >= 2:
         structure_score += 0.5
     if has_list:

@@ -41,6 +41,7 @@ rest are <1 week old and genuinely load-bearing. (Prev: 2026-05-29.)
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [A metric's headroom is not a defect — a "calibration" change must improve agreement with ground truth, not the number](#2026-06-01-active-a-metrics-headroom-is-not-a-defect--a-calibration-change-must-improve-agreement-with-ground-truth-not-the-number) |
 | 2026-06-01 | [ACTIVE] | [Weight tokens by signal, not count — and a year/boilerplate token is not a story identifier](#2026-06-01-active-weight-tokens-by-signal-not-count--and-a-yearboilerplate-token-is-not-a-story-identifier) |
 | 2026-06-01 | [ACTIVE] | [A query-generating tool is language-blind by default — localize the WORDS, keep the operators](#2026-06-01-active-a-query-generating-tool-is-language-blind-by-default--localize-the-words-keep-the-operators) |
 | 2026-06-01 | [ACTIVE] | [A "primary source" is domain-relative — adapt the angle to the topic, and match signals at word level](#2026-06-01-active-a-primary-source-is-domain-relative--adapt-the-angle-to-the-topic-and-match-signals-at-word-level) |
@@ -90,6 +91,36 @@ rest are <1 week old and genuinely load-bearing. (Prev: 2026-05-29.)
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] A metric's headroom is not a defect — a "calibration" change must improve agreement with ground truth, not the number
+
+- **Context (B34).** DQS's extraction sub-score was 87.2 (gauntlet 8.72/10),
+  capped by eval_judge's structure axis: clean multi-section *prose* gets 1.5/3.
+  The tempting "calibration" was to reward section depth so those articles score
+  higher — lifting the headline number.
+- **What the experiment showed.** It raised the gauntlet to 9.12 (DQS → 91.2) —
+  but the validation tool (`calibrate_judge`, the judge↔consumer correlation)
+  said r **fell** 0.932 → 0.925. It corrected 2 under-ratings (techcrunch/devto)
+  but introduced 2 over-ratings (zdnet/langchain). The number went up; agreement
+  with the consumer went *down*. **Reverted.**
+- **Rule.** **A change to a quality proxy is only a *calibration* if it makes the
+  proxy agree better with ground truth — measured, not assumed. If the headline
+  score rises but the correlation with the real consumer doesn't, you optimized
+  the metric, not the quality (Goodhart).** Always validate a scorer change
+  against the consumer set, and accept a *negative* result: the gauntlet fixtures
+  were only −0.5 from ideal, i.e. honest signal, not a defect to "fix".
+- **Leave a guardrail at the scene.** Reverting silently invites the next agent
+  to re-discover the same dead end. An NB comment in `eval_judge.py` (and this
+  entry + the declined B34 backlog row) records *why* the obvious tweak is wrong,
+  so the headroom isn't "fixed" on the next pass.
+- **Two failure modes of "raise the score".** (1) Inflate everything → Goodhart
+  (this). (2) The genuine remaining gap is elsewhere — headingless clean prose
+  (clean_flat −1.5, clean_short −2.0) — which *doesn't* touch the gauntlet/DQS
+  and is risky to reward (B26: don't let empty/near-empty content score high).
+  "Where the headroom is" ≠ "where the miscalibration is".
+- **Mechanism:** `evals/eval_judge.py` structure axis (NB comment) +
+  `evals/calibrate_judge.py` (the tool that vetoed the change). No code-behavior
+  change shipped — the deliverable is the validated decision.
 
 ### [2026-06-01] [ACTIVE] Weight tokens by signal, not count — and a year/boilerplate token is not a story identifier
 
