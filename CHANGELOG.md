@@ -133,6 +133,18 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Added — Active path to authority when 0 results are authoritative (2026-06-01, B35)
+- Real DDG results are dominated by SEO content farms, so `source_tier:
+  authoritative` rarely fires even when authorities exist (4/4 live runs were ~0
+  authoritative). New `suggest_queries.authority_query(topic)` renders the
+  domain-appropriate primary-source query (policy→.gov, medical→pubmed/nih,
+  science→arxiv, else→github). Surfaced two ways: the `search_web` docstring now
+  prescribes the recovery workflow for an all-`unknown` result set (call
+  `suggest_queries` and run its `site:`-authority angle), and `scripts/research.py`
+  prints the concrete authority query when a search returns 0 authoritative
+  results. Lets an agent reach the primary source directly instead of
+  corroborating SEO blogs. Tests: `TestB35AuthorityQuery`, `TestResearchAuthorityNudge`.
+
 ### Changed — suggest_queries primary source now covers medical & science (2026-06-01, B36)
 - The domain-adaptive primary-source angle (B29) now routes **medical** topics to
   `site:pubmed.ncbi.nlm.nih.gov OR site:nih.gov OR site:who.int` and **science**

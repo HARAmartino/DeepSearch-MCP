@@ -389,3 +389,19 @@ class TestLiveCheckSmoke:
     def test_sample_truncates(self):
         body = "x" * 5000
         assert len(live_check._sample(body, n=600)) < len(body)
+
+
+class TestResearchAuthorityNudge:
+    """B35: research.py points at the primary source when 0 authoritative."""
+
+    def test_authority_query_imported_and_used(self):
+        # research.py imports the helper and references it for the 0-auth nudge.
+        import inspect
+        src = inspect.getsource(research.run)
+        assert "authority_query" in src
+        assert "n_auth == 0" in src
+
+    def test_authority_query_helper_works(self):
+        # The helper research.py calls returns a runnable site: query.
+        from src.deepsearch_mcp.tools.suggest import authority_query
+        assert "site:" in authority_query("diabetes drug trial")

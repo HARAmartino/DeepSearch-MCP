@@ -343,6 +343,20 @@ def _primary_source_template(topic: str) -> str:
     return _PRIMARY_SOURCE_DEV
 
 
+def authority_query(topic: str) -> str:
+    """The domain-appropriate primary-source ("authority") query for a topic,
+    rendered ready to pass to `search_web` (B35).
+
+    Real DDG result sets are dominated by SEO content farms — `source_tier`
+    `authoritative` rarely fires even when authorities exist (4/4 live runs were
+    ~0 authoritative). When a search returns 0 authoritative results, run THIS
+    query to reach the primary source directly: policy → `.gov`/`europa.eu`/
+    `.int`, medical → `pubmed`/`nih.gov`/`who.int`, science → `arxiv`/`.edu`,
+    else → `github.com`. (Same routing as the suggest_queries primary angle.)
+    """
+    return _build_template_queries(topic, [_primary_source_template(topic)])[0]
+
+
 def _reserved_templates(topic: str) -> list[str]:
     """Reserved viewpoint templates: language-localized base (B32) + the
     domain-adaptive primary source (B29) as the guaranteed primary-source slot."""

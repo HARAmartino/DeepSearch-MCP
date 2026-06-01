@@ -131,10 +131,13 @@ async def search_web(
       filter recency at the source. Null does NOT mean old (most non-news URLs
       carry no date).
     - `source_tier`: 'authoritative' (curated trusted domain, .gov, .edu) or
-      'unknown'. **Read 'authoritative' results first.** If a result set is all
-      'unknown' (common for SEO-heavy topics), corroborate facts across several
-      independent results before trusting them. 'unknown' ≠ low quality — it
-      just means the domain isn't on the trust list.
+      'unknown'. **Read 'authoritative' results first.** 'unknown' ≠ low quality
+      — it just means the domain isn't on the trust list.
+      **If ALL results are 'unknown' (the common case — DDG ranks SEO content
+      farms above primary sources), the authority did not rank: don't just
+      corroborate blogs. Call `suggest_queries(topic)` and run its primary-source
+      `site:…` angle (it routes policy→.gov, medical→pubmed/nih, science→arxiv,
+      else→github) to reach the primary source directly.**
     - `near_duplicate`: true if the title closely matches an earlier result
       (same story). **Don't re-read near-duplicates** — but their count is
       useful corroboration. The primary copy (false) prefers an authoritative

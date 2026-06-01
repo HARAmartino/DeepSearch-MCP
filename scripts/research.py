@@ -36,7 +36,7 @@ from dogfood_audit import audit_markdown  # noqa: E402
 
 from src.deepsearch_mcp.tools.extractor import read_article  # noqa: E402
 from src.deepsearch_mcp.tools.search import search_web  # noqa: E402
-from src.deepsearch_mcp.tools.suggest import suggest_queries  # noqa: E402
+from src.deepsearch_mcp.tools.suggest import authority_query, suggest_queries  # noqa: E402
 
 
 def triage(pool: list[dict], read_n: int) -> list[dict]:
@@ -100,6 +100,11 @@ async def run(topic: str, region: str | None, read_n: int, per_search: int,
         return 1
     print(f"  search: {len(pool)} results | {n_auth} authoritative | "
           f"{n_dup} near-duplicate")
+    if n_auth == 0:
+        # B35: 0 authoritative is the norm (DDG buries primaries under SEO). Point
+        # at the primary source directly instead of corroborating content farms.
+        print(f"  ⚠ 0 authoritative — the primary source didn't rank. Reach it "
+              f"directly:\n      {authority_query(topic)}")
 
     # 2. triage + read
     picks = triage(pool, read_n)

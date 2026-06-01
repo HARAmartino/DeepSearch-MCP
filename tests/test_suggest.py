@@ -722,3 +722,22 @@ class TestB36MedicalSciencePrimarySource:
             _primary_source_template,
         )
         assert _primary_source_template("semaglutide long-term effects") == _PRIMARY_SOURCE_DEV
+
+
+class TestB35AuthorityQuery:
+    """B35: authority_query gives the domain-appropriate primary-source query to
+    run when a search returns 0 authoritative results (the common case)."""
+
+    def test_authority_query_routes_by_domain(self):
+        from src.deepsearch_mcp.tools.suggest import authority_query
+        assert "site:" in authority_query("EU AI Act enforcement")
+        assert ".gov" in authority_query("EU AI Act enforcement") or "europa" in authority_query("EU AI Act enforcement")
+        assert "pubmed" in authority_query("cancer drug clinical trial")
+        assert "arxiv" in authority_query("quantum error correction")
+        assert "github" in authority_query("React Server Components")
+
+    def test_authority_query_is_rendered_with_topic(self):
+        from src.deepsearch_mcp.tools.suggest import authority_query
+        q = authority_query("EU AI Act")
+        assert q.startswith("EU AI Act") or '"EU AI Act"' in q  # topic prefixed, not a bare template
+        assert "{topic}" not in q

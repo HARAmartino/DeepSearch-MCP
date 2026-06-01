@@ -41,6 +41,7 @@ rest are <1 week old and genuinely load-bearing. (Prev: 2026-05-29.)
 
 | Date | Tag | Title |
 |------|-----|-------|
+| 2026-06-01 | [ACTIVE] | [A trust signal that mostly returns "unknown" needs a recovery path, not just a warning — 4 live runs say so](#2026-06-01-active-a-trust-signal-that-mostly-returns-unknown-needs-a-recovery-path-not-just-a-warning--4-live-runs-say-so) |
 | 2026-06-01 | [ACTIVE] | [Keyword domain-detection is blind to bare-proper-noun topics — the entity IS the signal but is unlistable](#2026-06-01-active-keyword-domain-detection-is-blind-to-bare-proper-noun-topics--the-entity-is-the-signal-but-is-unlistable) |
 | 2026-06-01 | [ACTIVE] | [A metric's headroom is not a defect — a "calibration" change must improve agreement with ground truth, not the number](#2026-06-01-active-a-metrics-headroom-is-not-a-defect--a-calibration-change-must-improve-agreement-with-ground-truth-not-the-number) |
 | 2026-06-01 | [ACTIVE] | [Weight tokens by signal, not count — and a year/boilerplate token is not a story identifier](#2026-06-01-active-weight-tokens-by-signal-not-count--and-a-yearboilerplate-token-is-not-a-story-identifier) |
@@ -92,6 +93,34 @@ rest are <1 week old and genuinely load-bearing. (Prev: 2026-05-29.)
 | 2026-05-28 | [HISTORICAL] | [Project Initialization](#2026-05-28-historical-project-initialization) |
 
 ---
+
+### [2026-06-01] [ACTIVE] A trust signal that mostly returns "unknown" needs a recovery path, not just a warning — 4 live runs say so
+
+- **Context (B35).** `source_tier` (B15) labels each result authoritative/unknown
+  and tells the agent "if all unknown, corroborate". But across **four** live runs
+  (Rust/EU/JP/medical) the top results were ~**0 authoritative** every time — DDG
+  ranks SEO content farms above primary sources, so the *common* state is "all
+  unknown". A signal whose negative case is the default needs to do more than warn.
+- **Rule.** **When a quality/trust signal fires "negative" most of the time in
+  real usage, a passive label isn't enough — give the agent the *recovery
+  action*, not just the diagnosis.** Here: the primary source exists, it just
+  didn't rank, so the fix is to *reach it directly* (`authority_query` → a
+  `site:`-authority query for the topic's domain), surfaced in the docstring
+  workflow and the digest. Diagnosis ("unknown") + remedy ("search the authority
+  via site:") beats diagnosis alone.
+- **Only repeated REAL runs revealed the base rate.** One run with 0 authoritative
+  looks like bad luck; four across different domains is a structural property of
+  the retrieval layer (B15 quietly assumed authorities rank — they don't). The
+  pattern was invisible to fixtures and to any single run — it took a *count
+  across live dogfooding* to see "0-authoritative is the norm, not the exception".
+- **Reused, didn't reinvent.** The remedy is the B29/B36 primary-source router
+  wrapped as one rendered query — same routing the suggest_queries angle already
+  uses. A recovery path can often be assembled from capabilities you already
+  built; the gap was *connecting* them to the moment of need.
+- **Mechanism / tests:** `tools/suggest.py::authority_query` + `search_web`
+  docstring + `scripts/research.py` (0-auth nudge) +
+  `tests/test_suggest.py::TestB35AuthorityQuery` /
+  `tests/test_scripts.py::TestResearchAuthorityNudge`.
 
 ### [2026-06-01] [ACTIVE] Keyword domain-detection is blind to bare-proper-noun topics — the entity IS the signal but is unlistable
 
