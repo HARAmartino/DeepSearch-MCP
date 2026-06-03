@@ -78,6 +78,17 @@ _POLICY_SIGNALS = frozenset(
     "compliance government ministry parliament senate congress antitrust "
     "constitution amendment".split()
 )
+# B37: economics/finance/central-banking topics also route to OFFICIAL — their
+# primary source is `.gov`/official (federalreserve.gov, bls.gov, ecb.europa.eu),
+# all caught by `_PRIMARY_SOURCE_OFFICIAL` — not GitHub. A "Federal Reserve
+# interest rate decision" run got `site:github`. Only DISTINCTIVE words (no
+# "rate"/"interest"/"bank" — too generic). "federal" is safe: a federal-anything
+# research topic is US-government → `.gov`. (Bare-entity topics like "Bank of
+# Japan" with no finance keyword still default — the B36 limit.)
+_FINANCE_SIGNALS = frozenset(
+    "federal fed fomc monetary inflation deflation recession gdp fiscal treasury "
+    "ecb boj macroeconomic unemployment stagflation".split()
+)
 _MEDICAL_SIGNALS = frozenset(
     "disease drug drugs vaccine vaccines clinical symptom symptoms therapy "
     "treatment treatments diagnosis dose dosage efficacy pharmaceutical "
@@ -179,8 +190,9 @@ async def suggest_queries(
     2. Temporal-freshness ("2025 OR 2026") — first template because most research is time-bound
     3. Criticism angle — **always present** (breaks echo chambers)
     4. Alternatives angle
-    5. Primary-source angle — **always present**, and **domain-adaptive** (B29/B36):
-       policy/legal/gov → official sources (`site:.gov`/`europa.eu`/`.int`);
+    5. Primary-source angle — **always present**, and **domain-adaptive**
+       (B29/B36/B37): policy/legal/gov **and economics/finance** → official
+       sources (`site:.gov`/`europa.eu`/`.int` — e.g. federalreserve.gov);
        medical → `pubmed`/`nih.gov`/`who.int`; science → `arxiv`/`.edu`;
        everything else → `site:github.com` (dev/code default)
 
@@ -329,12 +341,13 @@ def _render_topic(topic: str) -> str:
 
 
 def _primary_source_template(topic: str) -> str:
-    """Pick a domain-appropriate primary-source angle (B29 + B36). Policy/legal/gov
-    → official sites; medical → pubmed/nih/who; science → arxiv/.edu; everything
-    else → the dev/code default (GitHub). Word-level match so "React" doesn't trip
-    "act". First match wins (policy → medical → science → dev)."""
+    """Pick a domain-appropriate primary-source angle (B29 + B36 + B37).
+    Policy/legal/gov AND economics/finance → official sites; medical →
+    pubmed/nih/who; science → arxiv/.edu; everything else → the dev/code default
+    (GitHub). Word-level match so "React" doesn't trip "act". First match wins
+    (policy|finance → medical → science → dev)."""
     words = set(re.findall(r"[a-z]+", topic.lower()))
-    if words & _POLICY_SIGNALS:
+    if words & _POLICY_SIGNALS or words & _FINANCE_SIGNALS:
         return _PRIMARY_SOURCE_OFFICIAL
     if words & _MEDICAL_SIGNALS:
         return _PRIMARY_SOURCE_MEDICAL

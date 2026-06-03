@@ -133,6 +133,17 @@ First release-ready version. All six development phases complete.
 
 ## [Unreleased]
 
+### Changed — suggest_queries primary source now covers finance/economics (2026-06-01, B37)
+- Economics/finance/central-banking topics now route their primary-source angle
+  to official sources (`site:.gov OR site:europa.eu OR site:.int` — e.g.
+  federalreserve.gov, ecb.europa.eu) instead of `site:github.com`. A "Federal
+  Reserve interest rate decision" run had produced a useless `site:github`.
+- Detection uses only distinctive finance words (federal/fed/fomc/monetary/
+  inflation/gdp/fiscal/treasury/ecb/…), not generic ones like "rate"/"interest"/
+  "bank" — verified no misfire on "heart rate" / "API rate limiting". Bare-entity
+  topics ("Bank of Japan") still default (the B36 keyword limit). Tests:
+  `tests/test_suggest.py::TestB37FinancePrimarySource`.
+
 ### Added — Active path to authority when 0 results are authoritative (2026-06-01, B35)
 - Real DDG results are dominated by SEO content farms, so `source_tier:
   authoritative` rarely fires even when authorities exist (4/4 live runs were ~0

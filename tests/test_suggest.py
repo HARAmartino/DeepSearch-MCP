@@ -741,3 +741,44 @@ class TestB35AuthorityQuery:
         q = authority_query("EU AI Act")
         assert q.startswith("EU AI Act") or '"EU AI Act"' in q  # topic prefixed, not a bare template
         assert "{topic}" not in q
+
+
+class TestB37FinancePrimarySource:
+    """B37: economics/finance/central-banking topics route to OFFICIAL (.gov),
+    not GitHub — their primary source is federalreserve.gov / ecb.europa.eu."""
+
+    def test_finance_topics_route_to_official(self):
+        from src.deepsearch_mcp.tools.suggest import (
+            _PRIMARY_SOURCE_OFFICIAL,
+            _primary_source_template,
+        )
+        for topic in ("Federal Reserve interest rate decision 2026",
+                      "US inflation report 2026",
+                      "ECB monetary policy",
+                      "recession risk GDP forecast"):
+            assert _primary_source_template(topic) == _PRIMARY_SOURCE_OFFICIAL, topic
+
+    @patch("src.deepsearch_mcp.tools.suggest._fetch_autocomplete", new_callable=AsyncMock)
+    async def test_fed_topic_authority_query_is_official(self, mock_ac):
+        from src.deepsearch_mcp.tools.suggest import authority_query
+        q = authority_query("Federal Reserve interest rate decision 2026")
+        assert "site:.gov" in q or "europa.eu" in q
+        assert "github" not in q
+
+    def test_distinctive_only_no_generic_misfire(self):
+        # Generic words ("rate"/"interest"/"bank") must NOT route to official.
+        from src.deepsearch_mcp.tools.suggest import (
+            _PRIMARY_SOURCE_DEV,
+            _primary_source_template,
+        )
+        assert _primary_source_template("heart rate variability") == _PRIMARY_SOURCE_DEV \
+            or "pubmed" in _primary_source_template("heart rate variability")  # medical ok
+        assert _primary_source_template("API rate limiting") == _PRIMARY_SOURCE_DEV
+
+    def test_bare_central_bank_entity_defaults_documented_limit(self):
+        # "Bank of Japan" has no finance keyword → defaults (B36/B37 limit).
+        from src.deepsearch_mcp.tools.suggest import (
+            _PRIMARY_SOURCE_DEV,
+            _primary_source_template,
+        )
+        assert _primary_source_template("Bank of Japan rate hike") == _PRIMARY_SOURCE_DEV
